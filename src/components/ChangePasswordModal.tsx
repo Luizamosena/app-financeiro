@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { KeyRound, Eye, EyeOff, CheckCircle2, AlertCircle, X } from 'lucide-react';
-import { getStoredCredentials, saveStoredCredentials } from '../utils/auth';
+import { getStoredCredentials } from '../utils/auth';
+import { syncSaveCredentials } from '../services/firestoreSync';
 
 interface ChangePasswordModalProps {
   isOpen: boolean;
@@ -42,8 +43,8 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
       return;
     }
 
-    // Save
-    saveStoredCredentials({
+    // Save locally and sync to Cloud Firestore
+    syncSaveCredentials({
       username: creds.username || 'admin',
       password: newPassword.trim(),
     });

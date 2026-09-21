@@ -44,6 +44,7 @@ import {
   syncSaveProfileData,
   subscribeToProfilesConfig,
   syncSaveProfilesConfig,
+  subscribeToCredentials,
 } from './services/firestoreSync';
 
 export default function App() {
@@ -174,13 +175,11 @@ export default function App() {
   const handleSwitchProfile = (targetProfileId: ProfileId) => {
     if (targetProfileId === activeProfileId) return;
 
-    // 1. Ensure current profile is completely saved
-    saveProfileData(activeProfileId, profileData);
+    // 1. Ensure current profile is completely saved to Cloud Firestore
+    syncSaveProfileData(activeProfileId, profileData);
 
-    // 2. Load target profile data
-    const targetData = loadProfileData(targetProfileId);
+    // 2. Set target profile ID (the real-time subscriber will automatically load Firestore data)
     setActiveProfileId(targetProfileId);
-    setProfileData(targetData);
 
     // 3. Update session
     if (authSession) {
@@ -192,7 +191,7 @@ export default function App() {
       saveActiveSession(updatedSession);
     }
 
-    showToast(`Ambiente alterado para ${profilesConfig[targetProfileId].name}. Dados carregados.`);
+    showToast(`Ambiente alterado para ${profilesConfig[targetProfileId].name}. Dados sincronizados.`);
   };
 
   // --- Save Profile Config (Renaming) ---
@@ -206,15 +205,15 @@ export default function App() {
   const handleLoginSuccess = (session: UserSession) => {
     setAuthSession(session);
     saveActiveSession(session);
-    setActiveProfileId(session.activeProfileId);
-    const loadedData = loadProfileData(session.activeProfileId);
-    setProfileData(loadedData);
+    if (session.activeProfileId !== activeProfileId) {
+      setActiveProfileId(session.activeProfileId);
+    }
     showToast(`Bem-vindo! Acessando ${profilesConfig[session.activeProfileId].name}.`);
   };
 
   const handleLogout = () => {
-    // Persist current profile data before logging out
-    saveProfileData(activeProfileId, profileData);
+    // Persist current profile data to Cloud before logging out
+    syncSaveProfileData(activeProfileId, profileData);
     clearActiveSession();
     setAuthSession(null);
     showToast('Sessão finalizada. Acesso restrito ao sistema.');

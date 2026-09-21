@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Plus, 
   Search, 
@@ -23,6 +23,7 @@ import {
 import { PagamentoFeito } from '../types';
 import { formatCurrency, formatDateBR, formatDateBResumida, formatMesAno, formatMesAnoResumido, parseCurrencyInput } from '../utils/formatters';
 import { exportPagamentosExcel, exportPagamentosPDF } from '../utils/reports';
+import { subscribeToFinancialOptions, syncSaveFinancialOptions } from '../services/firestoreSync';
 import { FiltroData, isDateInRange, getPeriodoDescricao } from '../utils/dateFilter';
 import { ConfirmModal } from './ConfirmModal';
 
@@ -114,6 +115,19 @@ export const PagamentosFeitosTab: React.FC<PagamentosFeitosTabProps> = ({
   });
   const [showNovaFormaInput, setShowNovaFormaInput] = useState(false);
   const [novaFormaNome, setNovaFormaNome] = useState('');
+
+  // Subscribe to real-time options from Firestore
+  useEffect(() => {
+    const unsubscribe = subscribeToFinancialOptions((opts) => {
+      if (opts.bancos && opts.bancos.length > 0) {
+        setBancosOpcoes(opts.bancos);
+      }
+      if (opts.formasPagamento && opts.formasPagamento.length > 0) {
+        setFormasPagamentoOpcoes(opts.formasPagamento);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
   const [observacoes, setObservacoes] = useState('');
   const [formError, setFormError] = useState('');
@@ -209,11 +223,7 @@ export const PagamentosFeitosTab: React.FC<PagamentosFeitosTabProps> = ({
     if (!formasPagamentoOpcoes.some(f => f.toLowerCase() === nomeLimpo.toLowerCase())) {
       const novasOpcoes = [...formasPagamentoOpcoes, nomeLimpo];
       setFormasPagamentoOpcoes(novasOpcoes);
-      try {
-        localStorage.setItem('transuniao_formas_pagamento_opcoes', JSON.stringify(novasOpcoes));
-      } catch {
-        // ignore
-      }
+      syncSaveFinancialOptions({ formasPagamento: novasOpcoes });
     }
     setFormaPagamento(nomeLimpo);
     setNovaFormaNome('');
@@ -227,11 +237,7 @@ export const PagamentosFeitosTab: React.FC<PagamentosFeitosTabProps> = ({
     if (!bancosOpcoes.some(b => b.toLowerCase() === nomeLimpo.toLowerCase())) {
       const novasOpcoes = [...bancosOpcoes, nomeLimpo];
       setBancosOpcoes(novasOpcoes);
-      try {
-        localStorage.setItem('transuniao_bancos_opcoes', JSON.stringify(novasOpcoes));
-      } catch {
-        // ignore
-      }
+      syncSaveFinancialOptions({ bancos: novasOpcoes });
     }
     setBanco(nomeLimpo);
     setNovoBancoNome('');
