@@ -1,0 +1,6 @@
+{
+  "name": "Gestão Financeira Empresarial",
+  "description": "Sistema de gestão financeira empresarial com acesso restrito por login, múltiplos perfis independentes (Matriz e Filial), controle de pagamentos efetuados, notas fiscais com importação XML, gestão de boletos a pagar e baixa de OS.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
