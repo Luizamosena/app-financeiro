@@ -39,6 +39,12 @@ import {
   saveProfileData, 
   resetProfileToDefault 
 } from './utils/profileStorage';
+import {
+  subscribeToProfileData,
+  syncSaveProfileData,
+  subscribeToProfilesConfig,
+  syncSaveProfilesConfig,
+} from './services/firestoreSync';
 
 export default function App() {
   // Authentication & Access Restriction State
@@ -63,6 +69,33 @@ export default function App() {
     const initialPid = session?.activeProfileId || 'perfil_1';
     return loadProfileData(initialPid);
   });
+
+  // Real-time Cloud Sync Status
+  const [isCloudSynced, setIsCloudSynced] = useState(true);
+
+  // Subscribe to real-time changes from Firestore for Profiles Config
+  useEffect(() => {
+    const unsubscribe = subscribeToProfilesConfig((remoteConfig) => {
+      setProfilesConfig(remoteConfig);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Subscribe to real-time changes from Firestore for Active Profile Data
+  useEffect(() => {
+    const unsubscribe = subscribeToProfileData(
+      activeProfileId,
+      (remoteData) => {
+        setProfileData(remoteData);
+        setIsCloudSynced(true);
+      },
+      (error) => {
+        console.warn('Firestore fallback to local mode:', error);
+        setIsCloudSynced(false);
+      }
+    );
+    return () => unsubscribe();
+  }, [activeProfileId]);
 
   // Navigation tab
   const [activeTab, setActiveTab] = useState<TabType>('pagamentos');
@@ -100,11 +133,11 @@ export default function App() {
   const boletos = profileData.boletos;
   const ordensServico = profileData.ordensServico;
 
-  // Helper setters that synchronously write to active profile's independent localStorage
+  // Helper setters that synchronously write to active profile's independent localStorage and cloud Firestore
   const updateActiveProfileData = (updater: (prev: ProfileData) => ProfileData) => {
     setProfileData(prev => {
       const updated = updater(prev);
-      saveProfileData(activeProfileId, updated);
+      syncSaveProfileData(activeProfileId, updated);
       return updated;
     });
   };
@@ -165,7 +198,7 @@ export default function App() {
   // --- Save Profile Config (Renaming) ---
   const handleSaveProfilesConfig = (newConfig: Record<ProfileId, ProfileConfig>) => {
     setProfilesConfig(newConfig);
-    saveProfilesConfig(newConfig);
+    syncSaveProfilesConfig(newConfig);
     showToast('Nomes e configurações dos perfis salvos com sucesso.');
   };
 
@@ -584,6 +617,7 @@ export default function App() {
   const confirmResetData = () => {
     const reset = resetProfileToDefault(activeProfileId);
     setProfileData(reset);
+    syncSaveProfileData(activeProfileId, reset);
     showToast(`Dados padrão restaurados para ${profilesConfig[activeProfileId].name}.`);
   };
 
@@ -737,6 +771,7 @@ export default function App() {
         activeProfileId={activeProfileId}
         profilesConfig={profilesConfig}
         currentUser={authSession.username}
+        isCloudSynced={isCloudSynced}
         onSwitchProfile={handleSwitchProfile}
         onOpenEditProfileModal={() => setShowEditProfileModal(true)}
         onOpenChangePasswordModal={() => setShowChangePasswordModal(true)}

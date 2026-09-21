@@ -8,7 +8,9 @@ import {
   User, 
   Layers, 
   KeyRound, 
-  UserCheck 
+  UserCheck,
+  CloudCheck,
+  CloudAlert
 } from 'lucide-react';
 import { PagamentoFeito, NotaFiscalEntrada, BoletoAPagar, ProfileId, ProfileConfig } from '../types';
 import { FiltroData } from '../utils/dateFilter';
@@ -23,6 +25,7 @@ interface HeaderProps {
   activeProfileId: ProfileId;
   profilesConfig: Record<ProfileId, ProfileConfig>;
   currentUser?: string;
+  isCloudSynced?: boolean;
   onSwitchProfile: (novoPerfil: ProfileId) => void;
   onOpenEditProfileModal: () => void;
   onOpenChangePasswordModal?: () => void;
@@ -45,6 +48,7 @@ export const Header: React.FC<HeaderProps> = ({
   activeProfileId,
   profilesConfig,
   currentUser = 'admin',
+  isCloudSynced = true,
   onSwitchProfile,
   onOpenEditProfileModal,
   onOpenChangePasswordModal,
@@ -71,7 +75,7 @@ export const Header: React.FC<HeaderProps> = ({
           : 'bg-indigo-900 text-indigo-100 border-indigo-950'
       }`}>
         <div className="max-w-[1600px] mx-auto flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             <span className="font-bold">
               Ambiente Ativo: {activeProfile.name}
@@ -81,8 +85,23 @@ export const Header: React.FC<HeaderProps> = ({
                 • {activeProfile.documento}
               </span>
             )}
-            <span className="text-[11px] opacity-80 hidden md:inline">
-              (Lançamentos 100% independentes do outro perfil)
+            {/* Cloud Sync Status Badge */}
+            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border ${
+              isCloudSynced
+                ? 'bg-emerald-500/20 text-emerald-200 border-emerald-400/40'
+                : 'bg-amber-500/20 text-amber-200 border-amber-400/40'
+            }`} title="Sincronização em tempo real na nuvem entre navegadores e dispositivos">
+              {isCloudSynced ? (
+                <>
+                  <CloudCheck className="w-3 h-3 text-emerald-300" />
+                  <span>Nuvem Sincronizada (Firebase)</span>
+                </>
+              ) : (
+                <>
+                  <CloudAlert className="w-3 h-3 text-amber-300 animate-pulse" />
+                  <span>Reconectando Nuvem...</span>
+                </>
+              )}
             </span>
           </div>
 

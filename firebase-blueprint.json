@@ -1,0 +1,31 @@
+{
+  "entities": {
+    "profileData": {
+      "description": "Dados financeiros por perfil de empresa (perfil_1 e perfil_2)",
+      "fields": {
+        "pagamentos": { "type": "array", "description": "Lançamentos de pagamentos efetuados" },
+        "notasFiscais": { "type": "array", "description": "Notas fiscais de entrada e serviços" },
+        "boletos": { "type": "array", "description": "Boletos a pagar e histórico de baixas" },
+        "ordensServico": { "type": "array", "description": "Ordens de serviço cadastradas" },
+        "updatedAt": { "type": "string", "description": "Timestamp ISO da última atualização" }
+      }
+    },
+    "profilesConfig": {
+      "description": "Nomes e configurações cadastrais dos perfis",
+      "fields": {
+        "config": { "type": "map", "description": "Dicionário com as configurações dos perfis" },
+        "updatedAt": { "type": "string", "description": "Timestamp ISO da última atualização" }
+      }
+    },
+    "userProfile": {
+      "description": "Dados do perfil administrativo do usuário",
+      "fields": {
+        "nomeCompleto": { "type": "string" },
+        "email": { "type": "string" },
+        "telefone": { "type": "string" },
+        "cargo": { "type": "string" },
+        "atualizadoEm": { "type": "string" }
+      }
+    }
+  }
+}

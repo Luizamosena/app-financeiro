@@ -12,7 +12,8 @@ import {
   AlertCircle 
 } from 'lucide-react';
 import { UserProfileData } from '../types';
-import { getUserProfileData, saveUserProfileData } from '../utils/auth';
+import { getUserProfileData } from '../utils/auth';
+import { syncSaveUserProfile } from '../services/firestoreSync';
 
 interface UserProfileModalProps {
   isOpen: boolean;
@@ -58,9 +59,9 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       return;
     }
 
-    saveUserProfileData(profile);
+    syncSaveUserProfile(profile);
     setSuccessSave(true);
-    onSuccessToast('Dados pessoais atualizados com sucesso!');
+    onSuccessToast('Dados pessoais atualizados com sucesso e salvos na nuvem!');
 
     setTimeout(() => {
       onClose();
