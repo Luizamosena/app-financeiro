@@ -26,7 +26,8 @@ import {
   XCircle,
   Eye,
   Copy,
-  FileCheck
+  FileCheck,
+  Zap
 } from 'lucide-react';
 import { 
   NotaFiscalEntrada, 
@@ -50,6 +51,7 @@ import { FiltroData, isDateInRange, getPeriodoDescricao } from '../utils/dateFil
 import { ConfirmModal } from './ConfirmModal';
 import { XMLNFeImporterModal } from './XMLNFeImporterModal';
 import { ParsedNFeData } from '../utils/xmlNFeParser';
+import { subscribeToFinancialOptions, syncSaveFinancialOptions } from '../services/firestoreSync';
 
 interface NotasFiscaisTabProps {
   notasFiscais: NotaFiscalEntrada[];
@@ -58,16 +60,28 @@ interface NotasFiscaisTabProps {
   filtroDataGlobal?: FiltroData;
   onAddNotaFiscal: (
     notaFiscal: Omit<NotaFiscalEntrada, 'id' | 'criadoEm'>, 
-    parcelasBoletos?: ParcelaBoletoInput[]
+    parcelasBoletos?: ParcelaBoletoInput[],
+    pagamentoPixData?: {
+      banco: string;
+      dataPagamento: string;
+      observacoes?: string;
+    }
   ) => void;
   onUpdateNotaFiscal: (
     id: string,
     notaFiscal: Partial<NotaFiscalEntrada>,
-    parcelasBoletos?: ParcelaBoletoInput[]
+    parcelasBoletos?: ParcelaBoletoInput[],
+    pagamentoPixData?: {
+      banco: string;
+      dataPagamento: string;
+      observacoes?: string;
+    }
   ) => void;
   onDeleteNotaFiscal: (id: string, deleteRelatedBoletos: boolean) => void;
   onNavigateToBoletos: () => void;
   onPagarELancarBoleto?: (boleto: BoletoAPagar, dataPagamento: string, banco?: string, observacoes?: string) => void;
+  onAddPagamento?: (pagamento: Omit<PagamentoFeito, 'id' | 'criadoEm'>) => void;
+  onNavigateToPagamentos?: () => void;
 }
 
 export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
@@ -80,6 +94,8 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
   onDeleteNotaFiscal,
   onNavigateToBoletos,
   onPagarELancarBoleto,
+  onAddPagamento,
+  onNavigateToPagamentos,
 }) => {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -105,6 +121,132 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
   const [observacoes, setObservacoes] = useState('');
   const [nfParaExcluir, setNfParaExcluir] = useState<{ nf: NotaFiscalEntrada; boletosQtd: number } | null>(null);
   const [excluirBoletosVinculados, setExcluirBoletosVinculados] = useState(true);
+
+  // Bank options (synced with Firestore / localStorage)
+  const [bancosOpcoes, setBancosOpcoes] = useState<string[]>(() => {
+    const defaultBanks = ['Banco do Brasil', 'Itaú', 'Pagbank'];
+    const legacyExcluded = ['bradesco', 'caixa econômica', 'caixa economica', 'santander', 'nubank', 'inter', 'banco inter', 'sicoob', 'sicredi'];
+    try {
+      const saved = localStorage.getItem('transuniao_bancos_opcoes');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const filtered = parsed.filter((b: string) => {
+            const bLower = b.toLowerCase().trim();
+            if (legacyExcluded.includes(bLower)) return false;
+            return true;
+          });
+          defaultBanks.forEach(db => {
+            if (!filtered.some((b: string) => b.toLowerCase() === db.toLowerCase())) {
+              filtered.push(db);
+            }
+          });
+          return filtered;
+        }
+      }
+    } catch {
+      // fallback
+    }
+    return defaultBanks;
+  });
+
+  // Subscribe to real-time financial options
+  React.useEffect(() => {
+    const unsubscribe = subscribeToFinancialOptions((opts) => {
+      if (opts.bancos && opts.bancos.length > 0) {
+        setBancosOpcoes(opts.bancos);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // PIX specific settings for auto-launching into Pagamentos Feitos
+  const [lancarPixAutomatico, setLancarPixAutomatico] = useState(true);
+  const [bancoPix, setBancoPix] = useState('Banco do Brasil');
+  const [bancoCustomPix, setBancoCustomPix] = useState('');
+  const [dataPagamentoPix, setDataPagamentoPix] = useState(() => new Date().toISOString().split('T')[0]);
+  const [obsPix, setObsPix] = useState('');
+  const [showNovoBancoPixInput, setShowNovoBancoPixInput] = useState(false);
+  const [novoBancoPixNome, setNovoBancoPixNome] = useState('');
+
+  const handleAdicionarNovoBancoPix = () => {
+    const nomeLimpo = novoBancoPixNome.trim();
+    if (!nomeLimpo) return;
+    if (bancosOpcoes.some(b => b.toLowerCase() === nomeLimpo.toLowerCase())) {
+      setBancoPix(nomeLimpo);
+      setShowNovoBancoPixInput(false);
+      setNovoBancoPixNome('');
+      return;
+    }
+    const novasOpcoes = [...bancosOpcoes, nomeLimpo];
+    setBancosOpcoes(novasOpcoes);
+    localStorage.setItem('transuniao_bancos_opcoes', JSON.stringify(novasOpcoes));
+    syncSaveFinancialOptions({ bancos: novasOpcoes });
+    setBancoPix(nomeLimpo);
+    setShowNovoBancoPixInput(false);
+    setNovoBancoPixNome('');
+  };
+
+  // Quick Modal: Lançar Pagamento PIX no Caixa
+  const [nfParaLancarPixModal, setNfParaLancarPixModal] = useState<NotaFiscalEntrada | null>(null);
+  const [dataPagamentoPixModal, setDataPagamentoPixModal] = useState(() => new Date().toISOString().split('T')[0]);
+  const [bancoPixModal, setBancoPixModal] = useState('Banco do Brasil');
+  const [bancoCustomPixModal, setBancoCustomPixModal] = useState('');
+  const [obsPixModal, setObsPixModal] = useState('');
+  const [showNovoBancoModalPix, setShowNovoBancoModalPix] = useState(false);
+  const [novoBancoModalPixNome, setNovoBancoModalPixNome] = useState('');
+
+  const handleAbrirModalLancarPix = (nf: NotaFiscalEntrada) => {
+    setNfParaLancarPixModal(nf);
+    setDataPagamentoPixModal(new Date().toISOString().split('T')[0]);
+    setBancoPixModal(nf.pixBanco || 'Banco do Brasil');
+    setBancoCustomPixModal('');
+    setObsPixModal(`Pagamento via PIX ref. NF ${nf.numeroNF}`);
+    setShowNovoBancoModalPix(false);
+    setNovoBancoModalPixNome('');
+  };
+
+  const handleConfirmarLancarPixModal = () => {
+    if (!nfParaLancarPixModal) return;
+    const bancoFinal = bancoPixModal === '__custom__' ? bancoCustomPixModal.trim() : bancoPixModal.trim();
+    if (!bancoFinal) {
+      alert('Por favor, selecione ou informe o banco onde o pagamento PIX foi efetuado.');
+      return;
+    }
+
+    if (onAddPagamento) {
+      onAddPagamento({
+        dataPagamento: dataPagamentoPixModal,
+        valor: nfParaLancarPixModal.valorTotal,
+        beneficiario: nfParaLancarPixModal.fornecedor,
+        numeroNotaFiscal: nfParaLancarPixModal.numeroNF,
+        mesEmissaoNF: nfParaLancarPixModal.dataEmissao.substring(0, 7),
+        formaPagamento: 'PIX',
+        banco: bancoFinal,
+        observacoes: obsPixModal.trim() || `Lançamento manual via PIX ref. NF ${nfParaLancarPixModal.numeroNF}`,
+      });
+    }
+
+    onUpdateNotaFiscal(nfParaLancarPixModal.id, {
+      pixLancado: true,
+      pixBanco: bancoFinal,
+      pixDataPagamento: dataPagamentoPixModal,
+    });
+
+    setNfParaLancarPixModal(null);
+  };
+
+  // Helper to detect if NF was paid via PIX
+  const getPixInfo = (nf: NotaFiscalEntrada) => {
+    const payment = pagamentos.find(p => 
+      (p.numeroNotaFiscal && p.numeroNotaFiscal.trim().toLowerCase() === nf.numeroNF.trim().toLowerCase()) ||
+      (nf.pixPagamentoId && p.id === nf.pixPagamentoId)
+    );
+    const isLancado = Boolean(nf.pixLancado || payment);
+    const banco = payment?.banco || nf.pixBanco;
+    const dataPagamento = payment?.dataPagamento || nf.pixDataPagamento;
+    return { isLancado, banco, dataPagamento, payment };
+  };
   
   // Boleto specific settings
   const [qtdParcelas, setQtdParcelas] = useState(1);
@@ -244,6 +386,10 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
       );
     } else if (data.formaPagamentoSugerida === 'boleto') {
       updateParcelasCount(1, data.valorTotal);
+    } else if (data.formaPagamentoSugerida === 'pix') {
+      setLancarPixAutomatico(true);
+      setDataPagamentoPix(data.dataEmissao || new Date().toISOString().split('T')[0]);
+      setObsPix(`Pagamento via PIX ref. NF ${data.numeroNF}`);
     }
 
     setXmlSuccessNotice(
@@ -297,6 +443,13 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
     setShowDuplicateAlertModal(false);
     setDuplicateConfirmedByOk(false);
     setIsSubmittingDuplicate(false);
+    setLancarPixAutomatico(true);
+    setBancoPix('Banco do Brasil');
+    setBancoCustomPix('');
+    setDataPagamentoPix(new Date().toISOString().split('T')[0]);
+    setObsPix('');
+    setShowNovoBancoPixInput(false);
+    setNovoBancoPixNome('');
     setShowForm(false);
   };
 
@@ -332,6 +485,12 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
       } else {
         updateParcelasCount(nf.quantidadeParcelas || 1, nf.valorTotal);
       }
+    } else if (nf.formaPagamento === 'pix') {
+      const pixInfo = getPixInfo(nf);
+      setLancarPixAutomatico(!pixInfo.isLancado);
+      setBancoPix(pixInfo.banco || nf.pixBanco || 'Banco do Brasil');
+      setDataPagamentoPix(pixInfo.dataPagamento || nf.pixDataPagamento || nf.dataEmissao || new Date().toISOString().split('T')[0]);
+      setObsPix(nf.observacoes || '');
     }
 
     setShowForm(true);
@@ -343,6 +502,21 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
     if (!categoria) {
       setFormError('Selecione obrigatoriamente a categoria da Nota Fiscal.');
       return;
+    }
+
+    let pixDataToSend: { banco: string; dataPagamento: string; observacoes?: string; } | undefined = undefined;
+
+    if (formaPagamento === 'pix' && lancarPixAutomatico) {
+      const bancoFinal = bancoPix === '__custom__' ? bancoCustomPix.trim() : bancoPix.trim();
+      if (!bancoFinal) {
+        setFormError('Selecione ou informe obrigatoriamente o Banco onde o pagamento PIX foi efetuado.');
+        return;
+      }
+      pixDataToSend = {
+        banco: bancoFinal,
+        dataPagamento: dataPagamentoPix || dataEmissao,
+        observacoes: obsPix.trim() || undefined,
+      };
     }
 
     if (editingId) {
@@ -357,8 +531,12 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
           formaPagamento,
           quantidadeParcelas: formaPagamento === 'boleto' ? qtdParcelas : undefined,
           observacoes: observacoes.trim() || undefined,
+          pixLancado: pixDataToSend ? true : undefined,
+          pixBanco: pixDataToSend ? pixDataToSend.banco : undefined,
+          pixDataPagamento: pixDataToSend ? pixDataToSend.dataPagamento : undefined,
         },
-        formaPagamento === 'boleto' ? parcelas : undefined
+        formaPagamento === 'boleto' ? parcelas : undefined,
+        pixDataToSend
       );
     } else {
       onAddNotaFiscal(
@@ -372,7 +550,8 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
           quantidadeParcelas: formaPagamento === 'boleto' ? qtdParcelas : undefined,
           observacoes: observacoes.trim() || undefined,
         },
-        formaPagamento === 'boleto' ? parcelas : undefined
+        formaPagamento === 'boleto' ? parcelas : undefined,
+        pixDataToSend
       );
     }
 
@@ -1075,6 +1254,172 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
               </div>
             )}
 
+            {/* Sub-painel dinâmico / Aba quando a forma de pagamento for PIX */}
+            {formaPagamento === 'pix' && (
+              <div className="bg-emerald-50/70 border border-emerald-300 rounded-xl p-4 space-y-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-2.5">
+                    <div className="p-2 bg-emerald-600 text-white rounded-lg shadow-2xs shrink-0 mt-0.5">
+                      <Zap className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-sm font-bold text-emerald-950">
+                          Lançamento Automático em Pagamentos Feitos (PIX)
+                        </h4>
+                        <span className="px-2 py-0.5 text-[10px] font-bold bg-emerald-200 text-emerald-900 rounded-md">
+                          Aba de Integração com o Caixa
+                        </span>
+                      </div>
+                      <p className="text-xs text-emerald-800 mt-0.5">
+                        Como o pagamento desta nota foi via PIX, lance simultaneamente este pagamento na aba <strong>1. Pagamentos Feitos</strong> selecionando o banco de saída abaixo.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Toggle para habilitar/desabilitar lançamento automático */}
+                  <label className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-emerald-300 cursor-pointer shadow-2xs shrink-0">
+                    <input
+                      type="checkbox"
+                      id="check-lancar-pix-automatico"
+                      checked={lancarPixAutomatico}
+                      onChange={(e) => setLancarPixAutomatico(e.target.checked)}
+                      className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
+                    />
+                    <span className="text-xs font-bold text-emerald-900">
+                      Lançar no Caixa
+                    </span>
+                  </label>
+                </div>
+
+                {lancarPixAutomatico && (
+                  <div className="bg-white p-3.5 rounded-xl border border-emerald-200 space-y-3 shadow-2xs animate-in fade-in duration-150">
+                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+                      {/* Banco do Pagamento */}
+                      <div className="sm:col-span-5">
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-xs font-semibold text-slate-700">
+                            Banco de Saída do PIX *
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setShowNovoBancoPixInput(!showNovoBancoPixInput)}
+                            className="text-[11px] font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1 cursor-pointer"
+                          >
+                            <Plus className="w-3 h-3" />
+                            <span>Outro Banco</span>
+                          </button>
+                        </div>
+
+                        {showNovoBancoPixInput ? (
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="text"
+                              placeholder="Nome do novo banco..."
+                              value={novoBancoPixNome}
+                              onChange={(e) => setNovoBancoPixNome(e.target.value)}
+                              className="w-full px-2.5 py-1.5 bg-slate-50 border border-emerald-400 rounded-lg text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                            />
+                            <button
+                              type="button"
+                              onClick={handleAdicionarNovoBancoPix}
+                              className="px-2.5 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700 shrink-0 cursor-pointer"
+                            >
+                              Salvar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowNovoBancoPixInput(false);
+                                setNovoBancoPixNome('');
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-slate-600 shrink-0 cursor-pointer"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="relative">
+                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                              <Building className="w-4 h-4" />
+                            </div>
+                            <select
+                              id="select-pix-banco"
+                              value={bancoPix}
+                              onChange={(e) => setBancoPix(e.target.value)}
+                              required
+                              className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-emerald-300 rounded-lg text-xs font-bold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                            >
+                              <option value="">Selecione o Banco...</option>
+                              {bancosOpcoes.map((b) => (
+                                <option key={b} value={b}>{b}</option>
+                              ))}
+                              <option value="__custom__">+ Outro Banco...</option>
+                            </select>
+                          </div>
+                        )}
+
+                        {bancoPix === '__custom__' && !showNovoBancoPixInput && (
+                          <input
+                            type="text"
+                            placeholder="Digite o nome do banco..."
+                            value={bancoCustomPix}
+                            onChange={(e) => setBancoCustomPix(e.target.value)}
+                            required
+                            className="mt-1.5 w-full px-2.5 py-1.5 bg-white border border-emerald-400 rounded-lg text-xs font-semibold text-slate-900 focus:ring-2 focus:ring-emerald-500"
+                          />
+                        )}
+                      </div>
+
+                      {/* Data do Pagamento PIX */}
+                      <div className="sm:col-span-3">
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                          Data do Pagamento *
+                        </label>
+                        <input
+                          type="date"
+                          id="input-pix-data-pagamento"
+                          required
+                          value={dataPagamentoPix}
+                          onChange={(e) => setDataPagamentoPix(e.target.value)}
+                          className="w-full px-2.5 py-2 bg-slate-50 border border-emerald-300 rounded-lg text-xs font-bold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        />
+                      </div>
+
+                      {/* Valor do PIX (Espelhado da NF) */}
+                      <div className="sm:col-span-4">
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                          Valor Lançado no Caixa
+                        </label>
+                        <div className="px-3 py-2 bg-emerald-50 border border-emerald-300 rounded-lg flex items-center justify-between">
+                          <span className="text-xs font-black text-emerald-950 font-mono">
+                            {formatCurrency(parseCurrencyInput(valorTotalInput))}
+                          </span>
+                          <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider">
+                            Total da NF
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Observações / Chave PIX */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Observações / Chave PIX / Comprovante (Opcional)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Ex: Chave PIX CNPJ do fornecedor, código de autenticação bancária..."
+                        value={obsPix}
+                        onChange={(e) => setObsPix(e.target.value)}
+                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Observações */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -1335,6 +1680,34 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
                               </span>
                             </button>
                           ) : null}
+
+                          {/* Se for PIX: mostra badge de pago ou botão rápido de lançamento no caixa */}
+                          {nf.formaPagamento === 'pix' && (() => {
+                            const pixInfo = getPixInfo(nf);
+                            return pixInfo.isLancado ? (
+                              <button
+                                type="button"
+                                id={`btn-ver-pix-nf-${nf.id}`}
+                                onClick={() => setNfParaVerBoletos(nf)}
+                                title="Ver detalhes do pagamento PIX lançado"
+                                className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded border bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300 transition-all cursor-pointer shadow-2xs"
+                              >
+                                <Zap className="w-3 h-3 text-emerald-600 shrink-0" />
+                                <span>PIX Pago ({pixInfo.banco || 'Caixa'} ✓)</span>
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                id={`btn-lancar-pix-nf-${nf.id}`}
+                                onClick={() => handleAbrirModalLancarPix(nf)}
+                                title="Lançar este pagamento PIX na lista de Pagamentos Feitos"
+                                className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded border bg-amber-50 hover:bg-emerald-50 text-amber-900 hover:text-emerald-900 border-amber-300 hover:border-emerald-300 transition-all cursor-pointer shadow-2xs animate-pulse"
+                              >
+                                <Zap className="w-3 h-3 text-amber-600 shrink-0" />
+                                <span>⚡ Lançar em Pagamentos</span>
+                              </button>
+                            );
+                          })()}
                         </div>
                       </td>
                       <td className="py-2.5 px-2.5 text-right font-bold text-slate-900 whitespace-nowrap text-xs">
@@ -1541,17 +1914,24 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
             {/* Cabeçalho do Modal */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/80">
               <div className="flex items-center gap-3">
-                <div className="p-2.5 rounded-xl bg-blue-100 text-blue-700">
-                  <Receipt className="w-5 h-5" />
+                <div className={`p-2.5 rounded-xl ${nfParaVerBoletos.formaPagamento === 'pix' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
+                  {nfParaVerBoletos.formaPagamento === 'pix' ? <Zap className="w-5 h-5" /> : <Receipt className="w-5 h-5" />}
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="text-base font-bold text-slate-900">
-                      Boletos da Nota Fiscal: {nfParaVerBoletos.numeroNF}
+                      {nfParaVerBoletos.formaPagamento === 'pix' 
+                        ? `Pagamento da Nota Fiscal: ${nfParaVerBoletos.numeroNF}` 
+                        : `Boletos da Nota Fiscal: ${nfParaVerBoletos.numeroNF}`}
                     </h3>
                     <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-50 text-blue-800 border border-blue-200">
                       {getCategoriaLabel(nfParaVerBoletos.categoria)}
                     </span>
+                    {nfParaVerBoletos.formaPagamento === 'pix' && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                        PIX
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-slate-500 mt-0.5">
                     {nfParaVerBoletos.fornecedor} • Emissão: {formatDateBR(nfParaVerBoletos.dataEmissao)}
@@ -1571,6 +1951,101 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
 
             {/* Conteúdo com Scroll */}
             <div className="p-6 overflow-y-auto space-y-6 flex-1">
+              {/* Seção Especial para Nota Fiscal via PIX */}
+              {nfParaVerBoletos.formaPagamento === 'pix' && (() => {
+                const pixInfo = getPixInfo(nfParaVerBoletos);
+                return (
+                  <div className="space-y-4">
+                    <div className={`p-4 rounded-xl border ${pixInfo.isLancado ? 'bg-emerald-50/80 border-emerald-300' : 'bg-amber-50/80 border-amber-300'} space-y-3`}>
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-2.5">
+                          <div className={`p-2.5 rounded-xl ${pixInfo.isLancado ? 'bg-emerald-600 text-white' : 'bg-amber-600 text-white'} shadow-2xs`}>
+                            <Zap className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-bold text-slate-900">
+                              {pixInfo.isLancado ? 'Pagamento via PIX Liquidado & Lançado no Caixa' : 'Pagamento via PIX Pendente de Lançamento no Caixa'}
+                            </h4>
+                            <p className="text-xs text-slate-600">
+                              {pixInfo.isLancado
+                                ? 'Este valor já está devidamente lançado na lista de Pagamentos Feitos.'
+                                : 'Esta nota fiscal foi cadastrada como PIX, mas o registro ainda não foi adicionado em Pagamentos Feitos.'}
+                            </p>
+                          </div>
+                        </div>
+
+                        {!pixInfo.isLancado && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const targetNf = nfParaVerBoletos;
+                              setNfParaVerBoletos(null);
+                              handleAbrirModalLancarPix(targetNf);
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs cursor-pointer transition-colors"
+                          >
+                            <Zap className="w-3.5 h-3.5" />
+                            <span>Lançar Pagamento Agora</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Detalhes do Pagamento PIX */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 text-xs">
+                        <div className="p-2.5 bg-white rounded-lg border border-slate-200 shadow-2xs">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                            Banco de Saída do PIX
+                          </span>
+                          <span className="text-xs font-bold text-slate-800 mt-1 block">
+                            {pixInfo.banco || (nfParaVerBoletos.pixBanco ?? 'Não informado')}
+                          </span>
+                        </div>
+
+                        <div className="p-2.5 bg-white rounded-lg border border-slate-200 shadow-2xs">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                            Data do Pagamento
+                          </span>
+                          <span className="text-xs font-bold text-slate-800 mt-1 block">
+                            {pixInfo.dataPagamento ? formatDateBR(pixInfo.dataPagamento) : formatDateBR(nfParaVerBoletos.dataEmissao)}
+                          </span>
+                        </div>
+
+                        <div className="p-2.5 bg-white rounded-lg border border-slate-200 shadow-2xs">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                            Valor Pago
+                          </span>
+                          <span className="text-xs font-black text-emerald-800 mt-1 block font-mono">
+                            {formatCurrency(pixInfo.payment?.valor || nfParaVerBoletos.valorTotal)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {pixInfo.payment?.observacoes && (
+                        <div className="text-xs text-slate-700 bg-white p-2.5 rounded-lg border border-slate-200">
+                          <strong>Observações do Lançamento:</strong> {pixInfo.payment.observacoes}
+                        </div>
+                      )}
+
+                      {pixInfo.isLancado && onNavigateToPagamentos && (
+                        <div className="flex justify-end pt-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNfParaVerBoletos(null);
+                              onNavigateToPagamentos();
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-100/70 hover:bg-emerald-200/80 rounded-lg transition-colors cursor-pointer"
+                          >
+                            <span>Ir para 1. Pagamentos Feitos</span>
+                            <ArrowRight className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Barra de Resumo */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
@@ -1994,6 +2469,194 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
                 className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-xs cursor-pointer"
               >
                 Confirmar Pagamento & Lançar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Lançamento Rápido de Pagamento PIX em Pagamentos Feitos */}
+      {nfParaLancarPixModal && (
+        <div
+          id="modal-lancar-pix-caixa"
+          className="fixed inset-0 z-60 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full border border-emerald-300 overflow-hidden animate-in zoom-in-95 duration-150">
+            {/* Header */}
+            <div className="px-5 py-4 border-b border-slate-100 bg-emerald-50/70 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-emerald-600 text-white shadow-2xs">
+                  <Zap className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    Lançar Pagamento PIX no Caixa
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    NF {nfParaLancarPixModal.numeroNF} • {nfParaLancarPixModal.fornecedor}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setNfParaLancarPixModal(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-5 space-y-4">
+              <div className="p-3 bg-emerald-50/60 border border-emerald-200 rounded-xl flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider block">
+                    Valor a ser Lançado
+                  </span>
+                  <span className="text-lg font-black text-emerald-950 font-mono">
+                    {formatCurrency(nfParaLancarPixModal.valorTotal)}
+                  </span>
+                </div>
+                <span className="px-2.5 py-1 text-xs font-bold bg-white text-emerald-800 border border-emerald-300 rounded-md shadow-2xs">
+                  Forma: PIX
+                </span>
+              </div>
+
+              {/* Seleção do Banco */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-slate-700">
+                    Banco de Saída do Pagamento *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowNovoBancoModalPix(!showNovoBancoModalPix)}
+                    className="text-[11px] font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>Outro Banco</span>
+                  </button>
+                </div>
+
+                {showNovoBancoModalPix ? (
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      placeholder="Nome do banco..."
+                      value={novoBancoModalPixNome}
+                      onChange={(e) => setNovoBancoModalPixNome(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-slate-50 border border-emerald-400 rounded-lg text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nome = novoBancoModalPixNome.trim();
+                        if (!nome) return;
+                        if (!bancosOpcoes.some(b => b.toLowerCase() === nome.toLowerCase())) {
+                          const nov = [...bancosOpcoes, nome];
+                          setBancosOpcoes(nov);
+                          localStorage.setItem('transuniao_bancos_opcoes', JSON.stringify(nov));
+                          syncSaveFinancialOptions({ bancos: nov });
+                        }
+                        setBancoPixModal(nome);
+                        setShowNovoBancoModalPix(false);
+                        setNovoBancoModalPixNome('');
+                      }}
+                      className="px-2.5 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700 shrink-0 cursor-pointer"
+                    >
+                      Salvar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowNovoBancoModalPix(false);
+                        setNovoBancoModalPixNome('');
+                      }}
+                      className="p-1.5 text-slate-400 hover:text-slate-600 shrink-0 cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                      <Building className="w-4 h-4" />
+                    </div>
+                    <select
+                      id="select-modal-pix-banco"
+                      value={bancoPixModal}
+                      onChange={(e) => setBancoPixModal(e.target.value)}
+                      className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-emerald-300 rounded-lg text-xs font-bold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                    >
+                      <option value="">Selecione o Banco...</option>
+                      {bancosOpcoes.map((b) => (
+                        <option key={b} value={b}>{b}</option>
+                      ))}
+                      <option value="__custom__">+ Outro Banco...</option>
+                    </select>
+                  </div>
+                )}
+
+                {bancoPixModal === '__custom__' && !showNovoBancoModalPix && (
+                  <input
+                    type="text"
+                    placeholder="Digite o nome do banco..."
+                    value={bancoCustomPixModal}
+                    onChange={(e) => setBancoCustomPixModal(e.target.value)}
+                    required
+                    className="mt-1.5 w-full px-2.5 py-1.5 bg-white border border-emerald-400 rounded-lg text-xs font-semibold text-slate-900 focus:ring-2 focus:ring-emerald-500"
+                  />
+                )}
+              </div>
+
+              {/* Data do Pagamento */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Data do Pagamento *
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={dataPagamentoPixModal}
+                  onChange={(e) => setDataPagamentoPixModal(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-emerald-300 rounded-lg text-xs font-bold text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              {/* Observações */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Observações do Pagamento (Opcional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ex: Chave PIX, código de autenticação bancária..."
+                  value={obsPixModal}
+                  onChange={(e) => setObsPixModal(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setNfParaLancarPixModal(null)}
+                className="px-3.5 py-2 text-xs font-medium text-slate-600 hover:text-slate-800 bg-white border border-slate-200 rounded-lg transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                id="btn-confirmar-lancar-pix-modal"
+                onClick={handleConfirmarLancarPixModal}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-xs transition-colors cursor-pointer"
+              >
+                <Check className="w-4 h-4" />
+                <span>Confirmar e Lançar em Pagamentos</span>
               </button>
             </div>
           </div>

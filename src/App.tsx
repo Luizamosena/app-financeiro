@@ -283,10 +283,15 @@ export default function App() {
     showToast('Lançamento de pagamento excluído.');
   };
 
-  // --- Handlers: Notas Fiscais & Automatic Boleto Generation ---
+  // --- Handlers: Notas Fiscais & Automatic Boleto / PIX Generation ---
   const handleAddNotaFiscal = (
     nfData: Omit<NotaFiscalEntrada, 'id' | 'criadoEm'>,
-    parcelasBoletos?: ParcelaBoletoInput[]
+    parcelasBoletos?: ParcelaBoletoInput[],
+    pagamentoPixData?: {
+      banco: string;
+      dataPagamento: string;
+      observacoes?: string;
+    }
   ) => {
     const novaNFId = 'nf-' + Date.now();
     const novaNF: NotaFiscalEntrada = {
@@ -294,8 +299,6 @@ export default function App() {
       id: novaNFId,
       criadoEm: new Date().toISOString(),
     };
-
-    setNotasFiscais(prev => [novaNF, ...prev]);
 
     // If payment method is 'boleto', generate the boletos automatically!
     if (nfData.formaPagamento === 'boleto' && parcelasBoletos && parcelasBoletos.length > 0) {
@@ -314,13 +317,43 @@ export default function App() {
         criadoEm: new Date().toISOString(),
       }));
 
+      setNotasFiscais(prev => [novaNF, ...prev]);
       setBoletos(prev => [...novosBoletos, ...prev]);
       showToast(
         `Nota Fiscal ${novaNF.numeroNF} salva! ${novosBoletos.length} boleto(s) a pagar gerado(s) na aba de Boletos.`,
         'Ver Boletos',
         () => setActiveTab('boletos')
       );
+    } else if (nfData.formaPagamento === 'pix' && pagamentoPixData && pagamentoPixData.banco) {
+      // Automatic PIX payment creation in Pagamentos Feitos
+      const novoPagamentoId = 'pag-' + Date.now();
+      const novoPagamento: PagamentoFeito = {
+        id: novoPagamentoId,
+        dataPagamento: pagamentoPixData.dataPagamento || novaNF.dataEmissao,
+        valor: novaNF.valorTotal,
+        beneficiario: novaNF.fornecedor,
+        numeroNotaFiscal: novaNF.numeroNF,
+        mesEmissaoNF: novaNF.dataEmissao ? novaNF.dataEmissao.substring(0, 7) : new Date().toISOString().substring(0, 7),
+        formaPagamento: 'PIX',
+        banco: pagamentoPixData.banco,
+        observacoes: pagamentoPixData.observacoes?.trim() || `Lançamento automático via PIX ref. NF ${novaNF.numeroNF}`,
+        criadoEm: new Date().toISOString(),
+      };
+
+      novaNF.pixLancado = true;
+      novaNF.pixBanco = pagamentoPixData.banco;
+      novaNF.pixDataPagamento = pagamentoPixData.dataPagamento || novaNF.dataEmissao;
+      novaNF.pixPagamentoId = novoPagamentoId;
+
+      setNotasFiscais(prev => [novaNF, ...prev]);
+      setPagamentos(prev => [novoPagamento, ...prev]);
+      showToast(
+        `Nota Fiscal ${novaNF.numeroNF} salva! Pagamento via PIX lançado em Pagamentos Feitos (${pagamentoPixData.banco}).`,
+        'Ver Pagamentos',
+        () => setActiveTab('pagamentos')
+      );
     } else {
+      setNotasFiscais(prev => [novaNF, ...prev]);
       showToast(`Nota Fiscal ${novaNF.numeroNF} registrada com sucesso!`);
     }
   };
@@ -328,13 +361,50 @@ export default function App() {
   const handleUpdateNotaFiscal = (
     id: string,
     updatedData: Partial<NotaFiscalEntrada>,
-    parcelasBoletos?: ParcelaBoletoInput[]
+    parcelasBoletos?: ParcelaBoletoInput[],
+    pagamentoPixData?: {
+      banco: string;
+      dataPagamento: string;
+      observacoes?: string;
+    }
   ) => {
     const existingNF = notasFiscais.find(nf => nf.id === id);
     if (!existingNF) return;
 
+    let pixExtraFields: Partial<NotaFiscalEntrada> = {};
+
+    if (updatedData.formaPagamento === 'pix' && pagamentoPixData && pagamentoPixData.banco) {
+      const novoPagamentoId = 'pag-' + Date.now();
+      const novoPagamento: PagamentoFeito = {
+        id: novoPagamentoId,
+        dataPagamento: pagamentoPixData.dataPagamento || updatedData.dataEmissao || existingNF.dataEmissao,
+        valor: updatedData.valorTotal ?? existingNF.valorTotal,
+        beneficiario: updatedData.fornecedor || existingNF.fornecedor,
+        numeroNotaFiscal: updatedData.numeroNF || existingNF.numeroNF,
+        mesEmissaoNF: (updatedData.dataEmissao || existingNF.dataEmissao).substring(0, 7),
+        formaPagamento: 'PIX',
+        banco: pagamentoPixData.banco,
+        observacoes: pagamentoPixData.observacoes?.trim() || `Lançamento automático via PIX ref. NF ${updatedData.numeroNF || existingNF.numeroNF}`,
+        criadoEm: new Date().toISOString(),
+      };
+
+      pixExtraFields = {
+        pixLancado: true,
+        pixBanco: pagamentoPixData.banco,
+        pixDataPagamento: pagamentoPixData.dataPagamento || updatedData.dataEmissao || existingNF.dataEmissao,
+        pixPagamentoId: novoPagamentoId,
+      };
+
+      setPagamentos(prev => [novoPagamento, ...prev]);
+      showToast(
+        `Nota Fiscal ${updatedData.numeroNF || existingNF.numeroNF} atualizada e pagamento via PIX lançado (${pagamentoPixData.banco})!`,
+        'Ver Pagamentos',
+        () => setActiveTab('pagamentos')
+      );
+    }
+
     setNotasFiscais(prev =>
-      prev.map(nf => (nf.id === id ? { ...nf, ...updatedData } : nf))
+      prev.map(nf => (nf.id === id ? { ...nf, ...updatedData, ...pixExtraFields } : nf))
     );
 
     // Sync metadata with boletos linked to this NF
@@ -818,6 +888,8 @@ export default function App() {
             onDeleteNotaFiscal={handleDeleteNotaFiscal}
             onNavigateToBoletos={() => setActiveTab('boletos')}
             onPagarELancarBoleto={handlePagarELancar}
+            onAddPagamento={handleAddPagamento}
+            onNavigateToPagamentos={() => setActiveTab('pagamentos')}
           />
         )}
 

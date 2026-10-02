@@ -34,6 +34,10 @@ export interface NotaFiscalEntrada {
   quantidadeParcelas?: number;
   observacoes?: string;
   criadoEm: string;
+  pixLancado?: boolean;
+  pixBanco?: string;
+  pixDataPagamento?: string;
+  pixPagamentoId?: string;
 }
 
 export interface BoletoAPagar {
