@@ -336,7 +336,7 @@ export default function App() {
         mesEmissaoNF: novaNF.dataEmissao ? novaNF.dataEmissao.substring(0, 7) : new Date().toISOString().substring(0, 7),
         formaPagamento: 'PIX',
         banco: pagamentoPixData.banco,
-        observacoes: pagamentoPixData.observacoes?.trim() || `Lançamento automático via PIX ref. NF ${novaNF.numeroNF}`,
+        observacoes: pagamentoPixData.observacoes?.trim() || undefined,
         criadoEm: new Date().toISOString(),
       };
 
@@ -384,7 +384,7 @@ export default function App() {
         mesEmissaoNF: (updatedData.dataEmissao || existingNF.dataEmissao).substring(0, 7),
         formaPagamento: 'PIX',
         banco: pagamentoPixData.banco,
-        observacoes: pagamentoPixData.observacoes?.trim() || `Lançamento automático via PIX ref. NF ${updatedData.numeroNF || existingNF.numeroNF}`,
+        observacoes: pagamentoPixData.observacoes?.trim() || undefined,
         criadoEm: new Date().toISOString(),
       };
 

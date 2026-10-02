@@ -201,7 +201,7 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
     setDataPagamentoPixModal(new Date().toISOString().split('T')[0]);
     setBancoPixModal(nf.pixBanco || 'Banco do Brasil');
     setBancoCustomPixModal('');
-    setObsPixModal(`Pagamento via PIX ref. NF ${nf.numeroNF}`);
+    setObsPixModal('');
     setShowNovoBancoModalPix(false);
     setNovoBancoModalPixNome('');
   };
@@ -223,7 +223,7 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
         mesEmissaoNF: nfParaLancarPixModal.dataEmissao.substring(0, 7),
         formaPagamento: 'PIX',
         banco: bancoFinal,
-        observacoes: obsPixModal.trim() || `Lançamento manual via PIX ref. NF ${nfParaLancarPixModal.numeroNF}`,
+        observacoes: obsPixModal.trim() || undefined,
       });
     }
 
@@ -389,7 +389,7 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
     } else if (data.formaPagamentoSugerida === 'pix') {
       setLancarPixAutomatico(true);
       setDataPagamentoPix(data.dataEmissao || new Date().toISOString().split('T')[0]);
-      setObsPix(`Pagamento via PIX ref. NF ${data.numeroNF}`);
+      setObsPix('');
     }
 
     setXmlSuccessNotice(
@@ -1651,38 +1651,9 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
                           <span className="text-[11px] font-medium text-slate-700">
                             {getFormaPagamentoLabel(nf.formaPagamento)}
                           </span>
-                          {/* Opção para ver os boletos da NF com respectivas datas de baixa */}
-                          {nf.formaPagamento === 'boleto' || totalBoletosRelacionados > 0 ? (
-                            <button
-                              id={`btn-ver-boletos-nf-${nf.id}`}
-                              type="button"
-                              onClick={() => setNfParaVerBoletos(nf)}
-                              title="Clique para ver os boletos desta Nota Fiscal e respectivas datas de baixa"
-                              className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded border transition-all cursor-pointer shadow-2xs ${
-                                totalPagosNF > 0 && boletosAbertosNF.length === 0
-                                  ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300'
-                                  : totalPagosNF > 0 && boletosAbertosNF.length > 0
-                                  ? 'bg-blue-50 hover:bg-blue-100 text-blue-800 border-blue-300'
-                                  : boletosAbertosNF.length > 0
-                                  ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300'
-                                  : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-300'
-                              }`}
-                            >
-                              <Receipt className="w-3 h-3 shrink-0" />
-                              <span>
-                                {totalPagosNF > 0 && boletosAbertosNF.length === 0
-                                  ? `Boletos (${totalPagosNF} pago${totalPagosNF > 1 ? 's' : ''} ✓)`
-                                  : totalPagosNF > 0 && boletosAbertosNF.length > 0
-                                  ? `Boletos (${boletosAbertosNF.length} ab, ${totalPagosNF} pg)`
-                                  : boletosAbertosNF.length > 0
-                                  ? `Boletos (${boletosAbertosNF.length} a pagar)`
-                                  : 'Ver Boletos'}
-                              </span>
-                            </button>
-                          ) : null}
 
-                          {/* Se for PIX: mostra badge de pago ou botão rápido de lançamento no caixa */}
-                          {nf.formaPagamento === 'pix' && (() => {
+                          {/* Se for PIX: mostra APENAS o aviso de PIX (o aviso de boletos nunca deve aparecer) */}
+                          {nf.formaPagamento === 'pix' ? (() => {
                             const pixInfo = getPixInfo(nf);
                             return pixInfo.isLancado ? (
                               <button
@@ -1707,7 +1678,37 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
                                 <span>⚡ Lançar em Pagamentos</span>
                               </button>
                             );
-                          })()}
+                          })() : (
+                            /* Opção para ver os boletos da NF com respectivas datas de baixa (apenas para NÃO PIX) */
+                            (nf.formaPagamento === 'boleto' || totalBoletosRelacionados > 0) ? (
+                              <button
+                                id={`btn-ver-boletos-nf-${nf.id}`}
+                                type="button"
+                                onClick={() => setNfParaVerBoletos(nf)}
+                                title="Clique para ver os boletos desta Nota Fiscal e respectivas datas de baixa"
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded border transition-all cursor-pointer shadow-2xs ${
+                                  totalPagosNF > 0 && boletosAbertosNF.length === 0
+                                    ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300'
+                                    : totalPagosNF > 0 && boletosAbertosNF.length > 0
+                                    ? 'bg-blue-50 hover:bg-blue-100 text-blue-800 border-blue-300'
+                                    : boletosAbertosNF.length > 0
+                                    ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300'
+                                    : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-300'
+                                }`}
+                              >
+                                <Receipt className="w-3 h-3 shrink-0" />
+                                <span>
+                                  {totalPagosNF > 0 && boletosAbertosNF.length === 0
+                                    ? `Boletos (${totalPagosNF} pago${totalPagosNF > 1 ? 's' : ''} ✓)`
+                                    : totalPagosNF > 0 && boletosAbertosNF.length > 0
+                                    ? `Boletos (${boletosAbertosNF.length} ab, ${totalPagosNF} pg)`
+                                    : boletosAbertosNF.length > 0
+                                    ? `Boletos (${boletosAbertosNF.length} a pagar)`
+                                    : 'Ver Boletos'}
+                                </span>
+                              </button>
+                            ) : null
+                          )}
                         </div>
                       </td>
                       <td className="py-2.5 px-2.5 text-right font-bold text-slate-900 whitespace-nowrap text-xs">
@@ -2020,7 +2021,15 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
                         </div>
                       </div>
 
-                      {pixInfo.payment?.observacoes && (
+                      {pixInfo.payment?.observacoes && !(() => {
+                        const obsLower = pixInfo.payment.observacoes.trim().toLowerCase();
+                        return (
+                          obsLower.startsWith('lançamento automático via pix') ||
+                          obsLower.startsWith('lançamento manual via pix') ||
+                          obsLower.startsWith('pagamento via pix ref. nf') ||
+                          obsLower === 'pagamento via pix'
+                        );
+                      })() && (
                         <div className="text-xs text-slate-700 bg-white p-2.5 rounded-lg border border-slate-200">
                           <strong>Observações do Lançamento:</strong> {pixInfo.payment.observacoes}
                         </div>

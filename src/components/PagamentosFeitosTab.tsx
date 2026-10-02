@@ -1054,7 +1054,15 @@ export const PagamentosFeitosTab: React.FC<PagamentosFeitosTabProps> = ({
                       <div className="font-semibold text-slate-800 truncate" title={pag.beneficiario}>
                         {pag.beneficiario}
                       </div>
-                      {pag.observacoes && (
+                      {pag.observacoes && !(() => {
+                        const obsLower = pag.observacoes.trim().toLowerCase();
+                        return (
+                          obsLower.startsWith('lançamento automático via pix') ||
+                          obsLower.startsWith('lançamento manual via pix') ||
+                          obsLower.startsWith('pagamento via pix ref. nf') ||
+                          obsLower === 'pagamento via pix'
+                        );
+                      })() && (
                         <div className="text-[11px] text-slate-500 truncate" title={pag.observacoes}>
                           {pag.observacoes}
                         </div>
