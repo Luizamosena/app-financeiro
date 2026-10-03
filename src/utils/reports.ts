@@ -125,6 +125,7 @@ export const exportPagamentosPDF = (pagamentos: PagamentoFeito[], subtituloFiltr
     head: [['Data Pagto', 'Beneficiário', 'NF Origem', 'Mês Emissão', 'Forma Pagto', 'Valor Pago', 'Banco', 'Observações']],
     body: tableData,
     foot: [['TOTAL GERAL', '', '', '', '', formatCurrency(totalValor), '', '']],
+    showFoot: 'lastPage',
     theme: 'striped',
     headStyles: {
       fillColor: [5, 150, 105], // emerald-600
@@ -253,6 +254,7 @@ export const exportNotasFiscaisPDF = (notas: NotaFiscalEntrada[], subtituloFiltr
     head: [['Nº NF', 'Emissão', 'Fornecedor', 'Categoria', 'Forma Pagamento', 'Valor Total']],
     body: tableData,
     foot: [['TOTAL GERAL', '', '', '', '', formatCurrency(totalValor)]],
+    showFoot: 'lastPage',
     theme: 'striped',
     headStyles: {
       fillColor: [37, 99, 235], // blue-600
@@ -407,6 +409,7 @@ export const exportBoletosPDF = (boletos: BoletoAPagar[], subtituloFiltro?: stri
     head: [['Vencimento', 'Situação', 'Fornecedor', 'NF Origem', 'Emissão NF', 'Categoria', 'Parcela', 'Valor', 'Código de Barras']],
     body: tableData,
     foot: [['TOTAL EM ABERTO', '', '', '', '', '', '', formatCurrency(totalValor), '']],
+    showFoot: 'lastPage',
     theme: 'striped',
     headStyles: {
       fillColor: [217, 119, 6], // amber-600
@@ -626,6 +629,7 @@ export const exportConsolidadoPDF = (
     head: [['Data Pagto', 'Beneficiário', 'NF Origem', 'Mês Emissão NF', 'Valor Pago']],
     body: pagTableData.length > 0 ? pagTableData : [['Nenhum pagamento registrado no período.', '', '', '', '']],
     foot: [['Total Pagamentos no Período', '', '', '', formatCurrency(totalPago)]],
+    showFoot: 'lastPage',
     theme: 'striped',
     headStyles: { fillColor: [5, 150, 105], fontSize: 8 },
     styles: { fontSize: 7.5, cellPadding: 4 },
@@ -658,6 +662,7 @@ export const exportConsolidadoPDF = (
       head: [['Vencimento', 'Situação', 'Fornecedor', 'NF Origem', 'Parcela', 'Valor']],
       body: bolTableData.length > 0 ? bolTableData : [['Nenhum boleto a pagar no período.', '', '', '', '', '']],
       foot: [['Total Boletos no Período', '', '', '', '', formatCurrency(totalBoletos)]],
+      showFoot: 'lastPage',
       theme: 'striped',
       headStyles: { fillColor: [217, 119, 6], fontSize: 8 },
       styles: { fontSize: 7.5, cellPadding: 4 },

@@ -24,7 +24,9 @@ import {
   formatDateBR, 
   getCategoriaLabel, 
   formatNumberToCurrencyInput, 
-  parseCurrencyInput 
+  parseCurrencyInput,
+  sanitizeCurrencyInputOnBlur,
+  maskCurrencyInput
 } from '../utils/formatters';
 
 interface AgruparBoletosModalProps {
@@ -101,7 +103,7 @@ export const AgruparBoletosModal: React.FC<AgruparBoletosModalProps> = ({
           numeroParcela: 1,
           dataVencimento: defaultDue,
           valor: total,
-          valorInput: total > 0 ? formatNumberToCurrencyInput(total) : '',
+          valorInput: total > 0 ? formatNumberToCurrencyInput(total) : '0,00',
           codigoBarras: '',
         },
       ]);
@@ -743,9 +745,18 @@ export const AgruparBoletosModal: React.FC<AgruparBoletosModalProps> = ({
                       </label>
                       <input
                         type="text"
+                        inputMode="numeric"
                         required
+                        placeholder="0,00"
                         value={parc.valorInput}
-                        onChange={e => handleUpdateParcelaValor(index, e.target.value)}
+                        onFocus={e => {
+                          if (parc.valorInput === '0,00' || parc.valorInput === '') e.target.select();
+                        }}
+                        onChange={e => handleUpdateParcelaValor(index, maskCurrencyInput(e.target.value))}
+                        onBlur={() => {
+                          const formatted = sanitizeCurrencyInputOnBlur(parc.valorInput);
+                          handleUpdateParcelaValor(index, formatted);
+                        }}
                         className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-900 focus:bg-white focus:ring-1 focus:ring-indigo-500"
                       />
                     </div>

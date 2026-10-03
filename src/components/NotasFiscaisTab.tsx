@@ -41,6 +41,10 @@ import {
   formatCurrency, 
   formatDateBR, 
   parseCurrencyInput, 
+  formatNumberToCurrencyInput,
+  sanitizeCurrencyInputOnBlur,
+  maskCurrencyInput,
+  getBancoBadgeClass,
   getCategoriaLabel, 
   getCategoriaBadgeClass,
   getFormaPagamentoLabel,
@@ -77,7 +81,7 @@ interface NotasFiscaisTabProps {
       observacoes?: string;
     }
   ) => void;
-  onDeleteNotaFiscal: (id: string, deleteRelatedBoletos: boolean) => void;
+  onDeleteNotaFiscal: (id: string, deleteRelatedBoletos: boolean, deleteRelatedPagamentos: boolean) => void;
   onNavigateToBoletos: () => void;
   onPagarELancarBoleto?: (boleto: BoletoAPagar, dataPagamento: string, banco?: string, observacoes?: string) => void;
   onAddPagamento?: (pagamento: Omit<PagamentoFeito, 'id' | 'criadoEm'>) => void;
@@ -114,13 +118,18 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
   // Form states
   const [numeroNF, setNumeroNF] = useState('');
   const [dataEmissao, setDataEmissao] = useState(() => new Date().toISOString().split('T')[0]);
-  const [valorTotalInput, setValorTotalInput] = useState('');
+  const [valorTotalInput, setValorTotalInput] = useState('0,00');
   const [fornecedor, setFornecedor] = useState('');
   const [categoria, setCategoria] = useState<CategoriaNF | ''>('');
   const [formaPagamento, setFormaPagamento] = useState<FormaPagamento>('boleto');
   const [observacoes, setObservacoes] = useState('');
-  const [nfParaExcluir, setNfParaExcluir] = useState<{ nf: NotaFiscalEntrada; boletosQtd: number } | null>(null);
+  const [nfParaExcluir, setNfParaExcluir] = useState<{ 
+    nf: NotaFiscalEntrada; 
+    boletosQtd: number;
+    pagamentosQtd: number;
+  } | null>(null);
   const [excluirBoletosVinculados, setExcluirBoletosVinculados] = useState(true);
+  const [excluirPagamentosVinculados, setExcluirPagamentosVinculados] = useState(true);
 
   // Bank options (synced with Firestore / localStorage)
   const [bancosOpcoes, setBancosOpcoes] = useState<string[]>(() => {
@@ -228,6 +237,7 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
     }
 
     onUpdateNotaFiscal(nfParaLancarPixModal.id, {
+      formaPagamento: 'pix',
       pixLancado: true,
       pixBanco: bancoFinal,
       pixDataPagamento: dataPagamentoPixModal,
@@ -259,6 +269,7 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
         return d.toISOString().split('T')[0];
       })(),
       valor: 0,
+      valorInput: '0,00',
       codigoBarras: '',
     }
   ]);
@@ -347,13 +358,15 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
       const d = new Date();
       // Default spacing: 30 days per installment
       d.setDate(d.getDate() + (30 * i));
+      const val = i === numParcelas && total > 0 
+        ? parseFloat((total - (valorPorParcela * (numParcelas - 1))).toFixed(2)) 
+        : valorPorParcela;
       
       novasParcelas.push({
         numeroParcela: i,
         dataVencimento: d.toISOString().split('T')[0],
-        valor: i === numParcelas && total > 0 
-          ? parseFloat((total - (valorPorParcela * (numParcelas - 1))).toFixed(2)) 
-          : valorPorParcela,
+        valor: val,
+        valorInput: formatNumberToCurrencyInput(val),
         codigoBarras: '',
       });
     }
@@ -365,7 +378,7 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
     setEditingId(null);
     setNumeroNF(data.numeroNF);
     setDataEmissao(data.dataEmissao);
-    setValorTotalInput(data.valorTotalFormatado);
+    setValorTotalInput(data.valorTotalFormatado || formatNumberToCurrencyInput(data.valorTotal));
     setFornecedor(data.fornecedorNome);
     setCategoria(''); // Nunca preencher automaticamente a categoria da NF
     setFormaPagamento(data.formaPagamentoSugerida);
@@ -374,22 +387,25 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
     setDuplicateCancelFeedback(null);
     setDuplicateConfirmedByOk(false);
 
-    if (data.duplicatas && data.duplicatas.length > 0) {
+    if (data.formaPagamentoSugerida === 'pix') {
+      setLancarPixAutomatico(true);
+      setDataPagamentoPix(data.dataEmissao || new Date().toISOString().split('T')[0]);
+      setObsPix('');
+      setQtdParcelas(1);
+      setParcelas([]);
+    } else if (data.duplicatas && data.duplicatas.length > 0) {
       setQtdParcelas(data.duplicatas.length);
       setParcelas(
         data.duplicatas.map(d => ({
           numeroParcela: d.numeroParcela,
           dataVencimento: d.dataVencimento,
           valor: d.valor,
+          valorInput: formatNumberToCurrencyInput(d.valor),
           codigoBarras: '',
         }))
       );
     } else if (data.formaPagamentoSugerida === 'boleto') {
       updateParcelasCount(1, data.valorTotal);
-    } else if (data.formaPagamentoSugerida === 'pix') {
-      setLancarPixAutomatico(true);
-      setDataPagamentoPix(data.dataEmissao || new Date().toISOString().split('T')[0]);
-      setObsPix('');
     }
 
     setXmlSuccessNotice(
@@ -413,8 +429,9 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
   };
 
   const handleValorTotalChange = (valStr: string) => {
-    setValorTotalInput(valStr);
-    const parsed = parseCurrencyInput(valStr);
+    const masked = maskCurrencyInput(valStr);
+    setValorTotalInput(masked);
+    const parsed = parseCurrencyInput(masked);
     if (formaPagamento === 'boleto') {
       updateParcelasCount(qtdParcelas, parsed);
     }
@@ -431,7 +448,7 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
   const resetForm = () => {
     setNumeroNF('');
     setDataEmissao(new Date().toISOString().split('T')[0]);
-    setValorTotalInput('');
+    setValorTotalInput('0,00');
     setFornecedor('');
     setCategoria(''); // Nunca preencher automaticamente
     setFormaPagamento('boleto');
@@ -457,7 +474,7 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
     setEditingId(nf.id);
     setNumeroNF(nf.numeroNF);
     setDataEmissao(nf.dataEmissao);
-    setValorTotalInput(nf.valorTotal.toString().replace('.', ','));
+    setValorTotalInput(formatNumberToCurrencyInput(nf.valorTotal));
     setFornecedor(nf.fornecedor);
     setCategoria(nf.categoria);
     setFormaPagamento(nf.formaPagamento);
@@ -480,6 +497,7 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
           numeroParcela: idx + 1,
           dataVencimento: b.dataVencimento,
           valor: b.valor,
+          valorInput: formatNumberToCurrencyInput(b.valor),
           codigoBarras: b.codigoBarras || '',
         })));
       } else {
@@ -1053,10 +1071,22 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
                   <input
                     id="input-nf-valor-total"
                     type="text"
+                    inputMode="numeric"
                     required
-                    placeholder="Ex: 4.800,00"
+                    placeholder="0,00"
                     value={valorTotalInput}
+                    onFocus={(e) => {
+                      if (valorTotalInput === '0,00' || valorTotalInput === '') e.target.select();
+                    }}
                     onChange={(e) => handleValorTotalChange(e.target.value)}
+                    onBlur={() => {
+                      const num = parseCurrencyInput(valorTotalInput);
+                      const formatted = formatNumberToCurrencyInput(num);
+                      setValorTotalInput(formatted);
+                      if (formaPagamento === 'boleto') {
+                        updateParcelasCount(qtdParcelas, num);
+                      }
+                    }}
                     className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                   />
                 </div>
@@ -1227,11 +1257,25 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
                           Valor da Parcela (R$) *
                         </label>
                         <input
-                          type="number"
-                          step="0.01"
+                          type="text"
+                          inputMode="numeric"
                           required
-                          value={parc.valor || ''}
-                          onChange={(e) => handleParcelaChange(idx, 'valor', parseFloat(e.target.value) || 0)}
+                          placeholder="0,00"
+                          value={parc.valorInput !== undefined ? parc.valorInput : formatNumberToCurrencyInput(parc.valor)}
+                          onFocus={(e) => {
+                            if (parc.valor === 0 || parc.valorInput === '0,00' || parc.valorInput === '') e.target.select();
+                          }}
+                          onChange={(e) => {
+                            const masked = maskCurrencyInput(e.target.value);
+                            const num = parseCurrencyInput(masked);
+                            handleParcelaChange(idx, 'valorInput', masked);
+                            handleParcelaChange(idx, 'valor', num);
+                          }}
+                          onBlur={(e) => {
+                            const num = parseCurrencyInput(e.target.value);
+                            handleParcelaChange(idx, 'valor', num);
+                            handleParcelaChange(idx, 'valorInput', formatNumberToCurrencyInput(num));
+                          }}
                           className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded text-slate-800 font-semibold focus:bg-white focus:ring-1 focus:ring-amber-500"
                         />
                       </div>
@@ -1648,67 +1692,73 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
                       </td>
                       <td className="py-2.5 px-2 whitespace-nowrap">
                         <div className="flex flex-col gap-1 items-start">
-                          <span className="text-[11px] font-medium text-slate-700">
-                            {getFormaPagamentoLabel(nf.formaPagamento)}
-                          </span>
-
-                          {/* Se for PIX: mostra APENAS o aviso de PIX (o aviso de boletos nunca deve aparecer) */}
-                          {nf.formaPagamento === 'pix' ? (() => {
+                          {(() => {
                             const pixInfo = getPixInfo(nf);
-                            return pixInfo.isLancado ? (
-                              <button
-                                type="button"
-                                id={`btn-ver-pix-nf-${nf.id}`}
-                                onClick={() => setNfParaVerBoletos(nf)}
-                                title="Ver detalhes do pagamento PIX lançado"
-                                className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded border bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300 transition-all cursor-pointer shadow-2xs"
-                              >
-                                <Zap className="w-3 h-3 text-emerald-600 shrink-0" />
-                                <span>PIX Pago ({pixInfo.banco || 'Caixa'} ✓)</span>
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                id={`btn-lancar-pix-nf-${nf.id}`}
-                                onClick={() => handleAbrirModalLancarPix(nf)}
-                                title="Lançar este pagamento PIX na lista de Pagamentos Feitos"
-                                className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded border bg-amber-50 hover:bg-emerald-50 text-amber-900 hover:text-emerald-900 border-amber-300 hover:border-emerald-300 transition-all cursor-pointer shadow-2xs animate-pulse"
-                              >
-                                <Zap className="w-3 h-3 text-amber-600 shrink-0" />
-                                <span>⚡ Lançar em Pagamentos</span>
-                              </button>
-                            );
-                          })() : (
-                            /* Opção para ver os boletos da NF com respectivas datas de baixa (apenas para NÃO PIX) */
-                            (nf.formaPagamento === 'boleto' || totalBoletosRelacionados > 0) ? (
-                              <button
-                                id={`btn-ver-boletos-nf-${nf.id}`}
-                                type="button"
-                                onClick={() => setNfParaVerBoletos(nf)}
-                                title="Clique para ver os boletos desta Nota Fiscal e respectivas datas de baixa"
-                                className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded border transition-all cursor-pointer shadow-2xs ${
-                                  totalPagosNF > 0 && boletosAbertosNF.length === 0
-                                    ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300'
-                                    : totalPagosNF > 0 && boletosAbertosNF.length > 0
-                                    ? 'bg-blue-50 hover:bg-blue-100 text-blue-800 border-blue-300'
-                                    : boletosAbertosNF.length > 0
-                                    ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300'
-                                    : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-300'
-                                }`}
-                              >
-                                <Receipt className="w-3 h-3 shrink-0" />
-                                <span>
-                                  {totalPagosNF > 0 && boletosAbertosNF.length === 0
-                                    ? `Boletos (${totalPagosNF} pago${totalPagosNF > 1 ? 's' : ''} ✓)`
-                                    : totalPagosNF > 0 && boletosAbertosNF.length > 0
-                                    ? `Boletos (${boletosAbertosNF.length} ab, ${totalPagosNF} pg)`
-                                    : boletosAbertosNF.length > 0
-                                    ? `Boletos (${boletosAbertosNF.length} a pagar)`
-                                    : 'Ver Boletos'}
+                            const isPix = nf.formaPagamento === 'pix' || Boolean(nf.pixLancado) || Boolean(nf.pixPagamentoId) || (pixInfo.isLancado && (Boolean(pixInfo.payment?.formaPagamento?.toLowerCase().includes('pix')) || Boolean(nf.pixBanco)));
+
+                            if (isPix) {
+                              // NF paga ou vinculada a PIX: mostra APENAS o aviso de PIX (o aviso de boletos nunca deve aparecer)
+                              return pixInfo.isLancado ? (
+                                <button
+                                  type="button"
+                                  id={`btn-ver-pix-nf-${nf.id}`}
+                                  onClick={() => setNfParaVerBoletos(nf)}
+                                  title="Ver detalhes do pagamento PIX lançado"
+                                  className="inline-flex items-center gap-1.5 px-2 py-1 text-xs font-semibold rounded-md border bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300 transition-all cursor-pointer shadow-2xs"
+                                >
+                                  <Zap className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                  <span>PIX Pago ({pixInfo.banco || 'Caixa'} ✓)</span>
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  id={`btn-lancar-pix-nf-${nf.id}`}
+                                  onClick={() => handleAbrirModalLancarPix(nf)}
+                                  title="Lançar este pagamento PIX na lista de Pagamentos Feitos"
+                                  className="inline-flex items-center gap-1.5 px-2 py-1 text-xs font-bold rounded-md border bg-amber-50 hover:bg-emerald-50 text-amber-900 hover:text-emerald-900 border-amber-300 hover:border-emerald-300 transition-all cursor-pointer shadow-2xs animate-pulse"
+                                >
+                                  <Zap className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                  <span>PIX (⚡ Lançar em Pagamentos)</span>
+                                </button>
+                              );
+                            }
+
+                            return (
+                              <>
+                                <span className="text-[11px] font-medium text-slate-700">
+                                  {getFormaPagamentoLabel(nf.formaPagamento)}
                                 </span>
-                              </button>
-                            ) : null
-                          )}
+                                {(nf.formaPagamento === 'boleto' || totalBoletosRelacionados > 0) && (
+                                  <button
+                                    id={`btn-ver-boletos-nf-${nf.id}`}
+                                    type="button"
+                                    onClick={() => setNfParaVerBoletos(nf)}
+                                    title="Clique para ver os boletos desta Nota Fiscal e respectivas datas de baixa"
+                                    className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded border transition-all cursor-pointer shadow-2xs ${
+                                      totalPagosNF > 0 && boletosAbertosNF.length === 0
+                                        ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300'
+                                        : totalPagosNF > 0 && boletosAbertosNF.length > 0
+                                        ? 'bg-blue-50 hover:bg-blue-100 text-blue-800 border-blue-300'
+                                        : boletosAbertosNF.length > 0
+                                        ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300'
+                                        : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-300'
+                                    }`}
+                                  >
+                                    <Receipt className="w-3 h-3 shrink-0" />
+                                    <span>
+                                      {totalPagosNF > 0 && boletosAbertosNF.length === 0
+                                        ? `Boletos (${totalPagosNF} pago${totalPagosNF > 1 ? 's' : ''} ✓)`
+                                        : totalPagosNF > 0 && boletosAbertosNF.length > 0
+                                        ? `Boletos (${boletosAbertosNF.length} ab, ${totalPagosNF} pg)`
+                                        : boletosAbertosNF.length > 0
+                                        ? `Boletos (${boletosAbertosNF.length} a pagar)`
+                                        : 'Ver Boletos'}
+                                    </span>
+                                  </button>
+                                )}
+                              </>
+                            );
+                          })()}
                         </div>
                       </td>
                       <td className="py-2.5 px-2.5 text-right font-bold text-slate-900 whitespace-nowrap text-xs">
@@ -1727,8 +1777,28 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
                           <button
                             id={`btn-delete-nf-${nf.id}`}
                             onClick={() => {
-                              setNfParaExcluir({ nf, boletosQtd: boletosAbertosNF.length });
+                              const nfNumClean = nf.numeroNF.replace(/\D/g, '');
+                              const nfNumLower = nf.numeroNF.trim().toLowerCase();
+                              
+                              const bRel = boletos.filter(b => 
+                                b.notaFiscalId === nf.id ||
+                                (b.numeroNF && b.numeroNF.trim().toLowerCase() === nfNumLower) ||
+                                (b.notasOrigem && b.notasOrigem.some(n => n.trim().toLowerCase() === nfNumLower || (Boolean(nfNumClean) && n.replace(/\D/g, '') === nfNumClean)))
+                              );
+                              
+                              const pRel = pagamentos.filter(p => 
+                                (nf.pixPagamentoId && p.id === nf.pixPagamentoId) ||
+                                (p.numeroNotaFiscal && p.numeroNotaFiscal.trim().toLowerCase() === nfNumLower) ||
+                                (Boolean(nfNumClean) && p.numeroNotaFiscal && p.numeroNotaFiscal.replace(/\D/g, '') === nfNumClean)
+                              );
+
+                              setNfParaExcluir({ 
+                                nf, 
+                                boletosQtd: bRel.length,
+                                pagamentosQtd: pRel.length 
+                              });
                               setExcluirBoletosVinculados(true);
+                              setExcluirPagamentosVinculados(true);
                             }}
                             title="Excluir Nota Fiscal"
                             className="p-1 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors cursor-pointer"
@@ -1758,23 +1828,69 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
         cancelText="Cancelar"
         variant="danger"
         extraContent={
-          nfParaExcluir && nfParaExcluir.boletosQtd > 0 ? (
-            <label className="flex items-start gap-2.5 p-3 bg-amber-50 border border-amber-200 rounded-lg cursor-pointer">
-              <input
-                type="checkbox"
-                checked={excluirBoletosVinculados}
-                onChange={(e) => setExcluirBoletosVinculados(e.target.checked)}
-                className="mt-0.5 rounded text-amber-600 focus:ring-amber-500"
-              />
-              <span className="text-xs text-amber-900 leading-tight">
-                Excluir também os <strong>{nfParaExcluir.boletosQtd} boleto(s) a pagar</strong> em aberto vinculados a esta nota fiscal.
-              </span>
-            </label>
+          nfParaExcluir && (nfParaExcluir.boletosQtd > 0 || nfParaExcluir.pagamentosQtd > 0) ? (
+            <div className="space-y-3 mt-3 text-left">
+              <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl space-y-1">
+                <div className="flex items-center gap-1.5 font-bold text-amber-950 text-xs">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Vínculos identificados no sistema:</span>
+                </div>
+                <p className="text-[11px] text-amber-900 leading-snug">
+                  Esta Nota Fiscal possui registros associados. Deseja excluir os pagamentos já realizados ou boletos a pagar vinculados a essa nota também?
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                {nfParaExcluir.boletosQtd > 0 && (
+                  <label className="flex items-start gap-2.5 p-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl cursor-pointer transition-colors">
+                    <input
+                      type="checkbox"
+                      id="check-excluir-boletos-nf"
+                      checked={excluirBoletosVinculados}
+                      onChange={(e) => setExcluirBoletosVinculados(e.target.checked)}
+                      className="mt-0.5 rounded text-rose-600 focus:ring-rose-500 w-4 h-4"
+                    />
+                    <div>
+                      <span className="text-xs font-bold text-slate-800 block">
+                        Excluir também {nfParaExcluir.boletosQtd} boleto(s) a pagar vinculado(s)
+                      </span>
+                      <span className="text-[11px] text-slate-500 block mt-0.5">
+                        Remove os boletos gerados desta nota fiscal na aba de Boletos a Pagar.
+                      </span>
+                    </div>
+                  </label>
+                )}
+
+                {nfParaExcluir.pagamentosQtd > 0 && (
+                  <label className="flex items-start gap-2.5 p-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl cursor-pointer transition-colors">
+                    <input
+                      type="checkbox"
+                      id="check-excluir-pagamentos-nf"
+                      checked={excluirPagamentosVinculados}
+                      onChange={(e) => setExcluirPagamentosVinculados(e.target.checked)}
+                      className="mt-0.5 rounded text-rose-600 focus:ring-rose-500 w-4 h-4"
+                    />
+                    <div>
+                      <span className="text-xs font-bold text-slate-800 block">
+                        Excluir também {nfParaExcluir.pagamentosQtd} pagamento(s) já realizado(s) vinculado(s)
+                      </span>
+                      <span className="text-[11px] text-slate-500 block mt-0.5">
+                        Estorna e apaga do Caixa / Pagamentos Feitos os pagamentos vinculados a esta nota.
+                      </span>
+                    </div>
+                  </label>
+                )}
+              </div>
+            </div>
           ) : undefined
         }
         onConfirm={() => {
           if (nfParaExcluir) {
-            onDeleteNotaFiscal(nfParaExcluir.nf.id, excluirBoletosVinculados);
+            onDeleteNotaFiscal(
+              nfParaExcluir.nf.id, 
+              excluirBoletosVinculados, 
+              excluirPagamentosVinculados
+            );
             setNfParaExcluir(null);
           }
         }}
@@ -1913,47 +2029,54 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
         >
           <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full border border-slate-200 overflow-hidden flex flex-col my-auto max-h-[92vh] animate-in fade-in zoom-in-95 duration-150">
             {/* Cabeçalho do Modal */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/80">
-              <div className="flex items-center gap-3">
-                <div className={`p-2.5 rounded-xl ${nfParaVerBoletos.formaPagamento === 'pix' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
-                  {nfParaVerBoletos.formaPagamento === 'pix' ? <Zap className="w-5 h-5" /> : <Receipt className="w-5 h-5" />}
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base font-bold text-slate-900">
-                      {nfParaVerBoletos.formaPagamento === 'pix' 
-                        ? `Pagamento da Nota Fiscal: ${nfParaVerBoletos.numeroNF}` 
-                        : `Boletos da Nota Fiscal: ${nfParaVerBoletos.numeroNF}`}
-                    </h3>
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-50 text-blue-800 border border-blue-200">
-                      {getCategoriaLabel(nfParaVerBoletos.categoria)}
-                    </span>
-                    {nfParaVerBoletos.formaPagamento === 'pix' && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
-                        PIX
-                      </span>
-                    )}
+            {(() => {
+              const pixInfo = getPixInfo(nfParaVerBoletos);
+              const isModalPix = nfParaVerBoletos.formaPagamento === 'pix' || Boolean(nfParaVerBoletos.pixLancado) || Boolean(nfParaVerBoletos.pixPagamentoId) || (pixInfo.isLancado && (Boolean(pixInfo.payment?.formaPagamento?.toLowerCase().includes('pix')) || Boolean(nfParaVerBoletos.pixBanco)));
+
+              return (
+                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/80">
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2.5 rounded-xl ${isModalPix ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
+                      {isModalPix ? <Zap className="w-5 h-5" /> : <Receipt className="w-5 h-5" />}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-base font-bold text-slate-900">
+                          {isModalPix 
+                            ? `Pagamento da Nota Fiscal: ${nfParaVerBoletos.numeroNF}` 
+                            : `Boletos da Nota Fiscal: ${nfParaVerBoletos.numeroNF}`}
+                        </h3>
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-50 text-blue-800 border border-blue-200">
+                          {getCategoriaLabel(nfParaVerBoletos.categoria)}
+                        </span>
+                        {isModalPix && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                            PIX
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {nfParaVerBoletos.fornecedor} • Emissão: {formatDateBR(nfParaVerBoletos.dataEmissao)}
+                      </p>
+                    </div>
                   </div>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    {nfParaVerBoletos.fornecedor} • Emissão: {formatDateBR(nfParaVerBoletos.dataEmissao)}
-                  </p>
+                  <button
+                    type="button"
+                    id="btn-fechar-modal-boletos-nf-x"
+                    onClick={() => setNfParaVerBoletos(null)}
+                    className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-lg transition-colors cursor-pointer"
+                    title="Fechar"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
                 </div>
-              </div>
-              <button
-                type="button"
-                id="btn-fechar-modal-boletos-nf-x"
-                onClick={() => setNfParaVerBoletos(null)}
-                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-lg transition-colors cursor-pointer"
-                title="Fechar"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+              );
+            })()}
 
             {/* Conteúdo com Scroll */}
             <div className="p-6 overflow-y-auto space-y-6 flex-1">
               {/* Seção Especial para Nota Fiscal via PIX */}
-              {nfParaVerBoletos.formaPagamento === 'pix' && (() => {
+              {(nfParaVerBoletos.formaPagamento === 'pix' || Boolean(nfParaVerBoletos.pixLancado) || Boolean(nfParaVerBoletos.pixPagamentoId) || getPixInfo(nfParaVerBoletos).isLancado) ? (() => {
                 const pixInfo = getPixInfo(nfParaVerBoletos);
                 return (
                   <div className="space-y-4">
@@ -2053,9 +2176,9 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
                     </div>
                   </div>
                 );
-              })()}
-
-              {/* Barra de Resumo */}
+              })() : (
+                <>
+                  {/* Barra de Resumo */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
                   <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
@@ -2332,21 +2455,39 @@ export const NotasFiscaisTab: React.FC<NotasFiscaisTabProps> = ({
                   </button>
                 </div>
               )}
+                </>
+              )}
             </div>
 
             {/* Rodapé do Modal */}
             <div className="flex items-center justify-between px-6 py-3.5 border-t border-slate-100 bg-slate-50/80">
-              <button
-                type="button"
-                onClick={() => {
-                  setNfParaVerBoletos(null);
-                  onNavigateToBoletos();
-                }}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl transition-colors cursor-pointer"
-              >
-                <span>Ir para a Aba de Boletos</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
+              {(nfParaVerBoletos.formaPagamento === 'pix' || Boolean(nfParaVerBoletos.pixLancado) || Boolean(nfParaVerBoletos.pixPagamentoId) || getPixInfo(nfParaVerBoletos).isLancado) ? (
+                onNavigateToPagamentos ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNfParaVerBoletos(null);
+                      onNavigateToPagamentos();
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-emerald-800 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-xl transition-colors cursor-pointer"
+                  >
+                    <span>Ir para 1. Pagamentos Feitos</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                ) : <div />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNfParaVerBoletos(null);
+                    onNavigateToBoletos();
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl transition-colors cursor-pointer"
+                >
+                  <span>Ir para a Aba de Boletos</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              )}
 
               <button
                 type="button"

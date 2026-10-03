@@ -3,7 +3,6 @@ import {
   Building2, 
   Download, 
   Upload, 
-  RotateCcw, 
   LogOut, 
   User, 
   Layers, 
@@ -32,7 +31,6 @@ interface HeaderProps {
   onOpenUserProfileModal?: () => void;
   onLogout: () => void;
   onFilterChange: (novoFiltro: FiltroData) => void;
-  onResetData: () => void;
   onExportData: () => void;
   onExportAmbosPerfis?: () => void;
   onImportData: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -55,7 +53,6 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenUserProfileModal,
   onLogout,
   onFilterChange,
-  onResetData,
   onExportData,
   onExportAmbosPerfis,
   onImportData,
@@ -244,16 +241,6 @@ export const Header: React.FC<HeaderProps> = ({
                 <span>Backup Geral (2 Perfis)</span>
               </button>
             )}
-
-            <button
-              id="btn-reset-sample"
-              onClick={onResetData}
-              className="inline-flex items-center gap-1.5 px-2.5 py-2 text-xs font-medium text-slate-500 hover:text-slate-800 bg-transparent hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-              title="Restaurar dados padrão deste perfil"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Restaurar Exemplo</span>
-            </button>
           </div>
         </div>
 

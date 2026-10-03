@@ -28,7 +28,7 @@ import {
 } from './types';
 import { ArrowRight, CheckCircle } from 'lucide-react';
 import { ConfirmModal } from './components/ConfirmModal';
-import { FiltroData, isDateInRange, getPeriodoDescricao } from './utils/dateFilter';
+import { FiltroData, isDateInRange, getPeriodoDescricao, getPresetDates } from './utils/dateFilter';
 import { exportConsolidadoExcel, exportConsolidadoPDF } from './utils/reports';
 import { formatDateBR } from './utils/formatters';
 import { getActiveSession, saveActiveSession, clearActiveSession } from './utils/auth';
@@ -36,8 +36,7 @@ import {
   getProfilesConfig, 
   saveProfilesConfig, 
   loadProfileData, 
-  saveProfileData, 
-  resetProfileToDefault 
+  saveProfileData
 } from './utils/profileStorage';
 import {
   subscribeToProfileData,
@@ -105,13 +104,15 @@ export default function App() {
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const [showUserProfileModal, setShowUserProfileModal] = useState(false);
-  const [showResetConfirm, setShowResetConfirm] = useState(false);
 
-  // Date range filter for dashboard summaries and consolidated reports
-  const [filtroData, setFiltroData] = useState<FiltroData>({
-    preset: 'todos',
-    dataInicio: '',
-    dataFim: '',
+  // Date range filter for dashboard summaries and consolidated reports (padrão: Mês Atual ao abrir o app)
+  const [filtroData, setFiltroData] = useState<FiltroData>(() => {
+    const dates = getPresetDates('mes_atual');
+    return {
+      preset: 'mes_atual',
+      dataInicio: dates.dataInicio,
+      dataFim: dates.dataFim,
+    };
   });
 
   // Toast Notification state
@@ -450,13 +451,44 @@ export default function App() {
     showToast(`Nota Fiscal ${updatedData.numeroNF || existingNF.numeroNF} atualizada com sucesso!`);
   };
 
-  const handleDeleteNotaFiscal = (id: string, deleteRelatedBoletos: boolean) => {
+  const handleDeleteNotaFiscal = (
+    id: string, 
+    deleteRelatedBoletos: boolean, 
+    deleteRelatedPagamentos: boolean
+  ) => {
     const targetNF = notasFiscais.find(nf => nf.id === id);
     setNotasFiscais(prev => prev.filter(nf => nf.id !== id));
 
-    if (deleteRelatedBoletos && targetNF) {
-      setBoletos(prev => prev.filter(b => b.notaFiscalId !== id && b.numeroNF !== targetNF.numeroNF));
+    if (targetNF) {
+      const nfNumClean = targetNF.numeroNF.replace(/\D/g, '');
+      const nfNumLower = targetNF.numeroNF.trim().toLowerCase();
+
+      if (deleteRelatedBoletos) {
+        setBoletos(prev => prev.filter(b => {
+          if (b.notaFiscalId === id) return false;
+          if (b.numeroNF && b.numeroNF.trim().toLowerCase() === nfNumLower) return false;
+          const bNumClean = b.numeroNF ? b.numeroNF.replace(/\D/g, '') : '';
+          if (nfNumClean && bNumClean && nfNumClean === bNumClean) return false;
+          if (b.notasOrigem && b.notasOrigem.some(n => n.trim().toLowerCase() === nfNumLower || (Boolean(nfNumClean) && n.replace(/\D/g, '') === nfNumClean))) {
+            return false;
+          }
+          return true;
+        }));
+      }
+
+      if (deleteRelatedPagamentos) {
+        setPagamentos(prev => prev.filter(p => {
+          if (targetNF.pixPagamentoId && p.id === targetNF.pixPagamentoId) return false;
+          if (!p.numeroNotaFiscal) return true;
+          const pNumLower = p.numeroNotaFiscal.trim().toLowerCase();
+          if (pNumLower === nfNumLower) return false;
+          const pNumClean = p.numeroNotaFiscal.replace(/\D/g, '');
+          if (nfNumClean && pNumClean && nfNumClean === pNumClean) return false;
+          return true;
+        }));
+      }
     }
+
     showToast('Nota Fiscal excluída com sucesso.');
   };
 
@@ -678,18 +710,6 @@ export default function App() {
     return toAdd.length;
   };
 
-  // --- Backup & Restore ---
-  const handleResetData = () => {
-    setShowResetConfirm(true);
-  };
-
-  const confirmResetData = () => {
-    const reset = resetProfileToDefault(activeProfileId);
-    setProfileData(reset);
-    syncSaveProfileData(activeProfileId, reset);
-    showToast(`Dados padrão restaurados para ${profilesConfig[activeProfileId].name}.`);
-  };
-
   // Export current active profile
   const handleExportData = () => {
     const exportObject = {
@@ -847,7 +867,6 @@ export default function App() {
         onOpenUserProfileModal={() => setShowUserProfileModal(true)}
         onLogout={handleLogout}
         onFilterChange={setFiltroData}
-        onResetData={handleResetData}
         onExportData={handleExportData}
         onExportAmbosPerfis={handleExportAmbosPerfis}
         onImportData={handleImportData}
@@ -945,18 +964,6 @@ export default function App() {
         isOpen={showUserProfileModal}
         onClose={() => setShowUserProfileModal(false)}
         onSuccessToast={showToast}
-      />
-
-      {/* Modal de Restauração de Dados */}
-      <ConfirmModal
-        isOpen={showResetConfirm}
-        title={`Restaurar Dados - ${profilesConfig[activeProfileId].name}`}
-        description={`Deseja restaurar os lançamentos padrão de "${profilesConfig[activeProfileId].name}"? Apenas os dados deste perfil serão redefinidos. O outro perfil permanecerá inalterado.`}
-        confirmText="Restaurar Dados"
-        cancelText="Cancelar"
-        variant="warning"
-        onConfirm={confirmResetData}
-        onClose={() => setShowResetConfirm(false)}
       />
     </div>
   );

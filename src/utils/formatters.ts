@@ -14,12 +14,85 @@ export const parseCurrencyInput = (valueStr: string): number => {
   return isNaN(num) ? 0 : num;
 };
 
-export const formatNumberToCurrencyInput = (val: number): string => {
-  if (isNaN(val)) return '0,00';
+export const formatNumberToCurrencyInput = (val: number | null | undefined): string => {
+  if (val === null || val === undefined || isNaN(val)) return '0,00';
   return val.toLocaleString('pt-BR', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+};
+
+export const sanitizeCurrencyInputOnBlur = (valueStr: string): string => {
+  if (!valueStr || !valueStr.trim()) return '0,00';
+  const num = parseCurrencyInput(valueStr);
+  return formatNumberToCurrencyInput(num);
+};
+
+/**
+ * Máscara monetária que preenche os centavos automaticamente da direita para a esquerda
+ * sem que o usuário precise digitar a vírgula.
+ * Exemplo: 1 -> 0,01 | 15 -> 0,15 | 150 -> 1,50 | 1500 -> 15,00 | 15000 -> 150,00
+ */
+export const maskCurrencyInput = (valueStr: string): string => {
+  if (!valueStr) return '0,00';
+  
+  // Extrai somente os dígitos
+  const cleanDigits = valueStr.replace(/\D/g, '');
+  if (!cleanDigits) return '0,00';
+  
+  // Limita a até 12 dígitos para evitar overflow
+  const digits = cleanDigits.length > 12 ? cleanDigits.slice(-12) : cleanDigits;
+  const cents = parseInt(digits, 10);
+  if (isNaN(cents) || cents === 0) return '0,00';
+  
+  const val = cents / 100;
+  return val.toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+};
+
+/**
+ * Retorna as classes de cores dos bancos para badges:
+ * - Banco do Brasil: amarelo
+ * - Itaú: laranja
+ * - Pagbank: verde
+ */
+export const getBancoBadgeClass = (bancoNome?: string): { badge: string; icon: string } => {
+  if (!bancoNome || !bancoNome.trim()) {
+    return { badge: 'bg-slate-100 text-slate-600 border-slate-200', icon: 'text-slate-400' };
+  }
+  const bLower = bancoNome.toLowerCase().trim();
+  
+  // Banco do Brasil: Amarelo
+  if (bLower.includes('brasil') || bLower === 'bb') {
+    return {
+      badge: 'bg-amber-100 text-amber-950 border-amber-300 font-bold shadow-2xs',
+      icon: 'text-amber-700'
+    };
+  }
+  
+  // Itaú: Laranja
+  if (bLower.includes('itaú') || bLower.includes('itau')) {
+    return {
+      badge: 'bg-orange-100 text-orange-950 border-orange-300 font-bold shadow-2xs',
+      icon: 'text-orange-600'
+    };
+  }
+  
+  // Pagbank: Verde
+  if (bLower.includes('pagbank') || bLower.includes('pag bank') || bLower.includes('pagseguro')) {
+    return {
+      badge: 'bg-emerald-100 text-emerald-950 border-emerald-300 font-bold shadow-2xs',
+      icon: 'text-emerald-700'
+    };
+  }
+  
+  // Demais bancos
+  return {
+    badge: 'bg-blue-50 text-blue-800 border-blue-200 font-semibold shadow-2xs',
+    icon: 'text-blue-600'
+  };
 };
 
 export const formatDateBR = (isoDate: string): string => {

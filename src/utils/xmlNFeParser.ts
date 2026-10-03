@@ -222,6 +222,8 @@ export function parseNFeXML(xmlContent: string): ParsedNFeData {
 
   if (tPag === '90' || natOpLower.includes('sem faturamento') || categoriaSugerida === 'retorno de conserto') {
     formaPagamentoSugerida = 'sem faturamento';
+  } else if (tPag === '17') {
+    formaPagamentoSugerida = 'pix';
   } else if (duplicatas.length > 0) {
     formaPagamentoSugerida = 'boleto';
   } else {
@@ -231,8 +233,6 @@ export function parseNFeXML(xmlContent: string): ParsedNFeData {
       formaPagamentoSugerida = 'cartao';
     } else if (tPag === '15') {
       formaPagamentoSugerida = 'boleto';
-    } else if (tPag === '17') {
-      formaPagamentoSugerida = 'pix';
     } else {
       formaPagamentoSugerida = 'boleto';
     }

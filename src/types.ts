@@ -20,6 +20,7 @@ export interface ParcelaBoletoInput {
   numeroParcela: number;
   dataVencimento: string; // YYYY-MM-DD
   valor: number;
+  valorInput?: string;
   codigoBarras?: string;
 }
 

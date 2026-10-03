@@ -30,7 +30,10 @@ import {
   getStatusVencimento, 
   getCategoriaLabel, 
   getCategoriaBadgeClass,
-  parseCurrencyInput 
+  parseCurrencyInput,
+  formatNumberToCurrencyInput,
+  sanitizeCurrencyInputOnBlur,
+  maskCurrencyInput
 } from '../utils/formatters';
 import { exportBoletosExcel, exportBoletosPDF } from '../utils/reports';
 import { FiltroData, isDateInRange, getPeriodoDescricao } from '../utils/dateFilter';
@@ -115,7 +118,7 @@ export const BoletosTab: React.FC<BoletosTabProps> = ({
   const [novoFornecedor, setNovoFornecedor] = useState('');
   const [novaCategoria, setNovaCategoria] = useState<CategoriaNF>('consumo');
   const [novaDataEmissao, setNovaDataEmissao] = useState(() => new Date().toISOString().split('T')[0]);
-  const [novoValorInput, setNovoValorInput] = useState('');
+  const [novoValorInput, setNovoValorInput] = useState('0,00');
   const [novoVencimento, setNovoVencimento] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() + 15);
@@ -129,7 +132,7 @@ export const BoletosTab: React.FC<BoletosTabProps> = ({
   const [editNumeroNF, setEditNumeroNF] = useState('');
   const [editFornecedor, setEditFornecedor] = useState('');
   const [editDataVencimento, setEditDataVencimento] = useState('');
-  const [editValorInput, setEditValorInput] = useState('');
+  const [editValorInput, setEditValorInput] = useState('0,00');
   const [editDataEmissaoNF, setEditDataEmissaoNF] = useState('');
   const [editCategoria, setEditCategoria] = useState<CategoriaNF>('consumo');
   const [editParcelaInfo, setEditParcelaInfo] = useState('');
@@ -158,7 +161,7 @@ export const BoletosTab: React.FC<BoletosTabProps> = ({
     setEditNumeroNF(bol.numeroNF);
     setEditFornecedor(bol.fornecedor);
     setEditDataVencimento(bol.dataVencimento);
-    setEditValorInput(bol.valor.toString().replace('.', ','));
+    setEditValorInput(formatNumberToCurrencyInput(bol.valor));
     setEditDataEmissaoNF(bol.dataEmissaoNF);
     setEditCategoria(bol.categoria);
     setEditParcelaInfo(bol.parcelaInfo || 'Única');
@@ -371,7 +374,7 @@ export const BoletosTab: React.FC<BoletosTabProps> = ({
     setShowAddModal(false);
     setNovoNumeroNF('');
     setNovoFornecedor('');
-    setNovoValorInput('');
+    setNovoValorInput('0,00');
     setNovoCodigoBarras('');
     setModalError('');
   };
@@ -1476,10 +1479,15 @@ export const BoletosTab: React.FC<BoletosTabProps> = ({
                       </div>
                       <input
                         type="text"
+                        inputMode="numeric"
                         required
                         placeholder="0,00"
                         value={editValorInput}
-                        onChange={(e) => setEditValorInput(e.target.value)}
+                        onFocus={(e) => {
+                          if (editValorInput === '0,00' || editValorInput === '') e.target.select();
+                        }}
+                        onChange={(e) => setEditValorInput(maskCurrencyInput(e.target.value))}
+                        onBlur={() => setEditValorInput(sanitizeCurrencyInputOnBlur(editValorInput))}
                         className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 font-bold focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                       />
                     </div>

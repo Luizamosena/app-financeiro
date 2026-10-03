@@ -21,7 +21,18 @@ import {
   Barcode
 } from 'lucide-react';
 import { PagamentoFeito } from '../types';
-import { formatCurrency, formatDateBR, formatDateBResumida, formatMesAno, formatMesAnoResumido, parseCurrencyInput } from '../utils/formatters';
+import { 
+  formatCurrency, 
+  formatDateBR, 
+  formatDateBResumida, 
+  formatMesAno, 
+  formatMesAnoResumido, 
+  parseCurrencyInput,
+  formatNumberToCurrencyInput,
+  sanitizeCurrencyInputOnBlur,
+  maskCurrencyInput,
+  getBancoBadgeClass
+} from '../utils/formatters';
 import { exportPagamentosExcel, exportPagamentosPDF } from '../utils/reports';
 import { subscribeToFinancialOptions, syncSaveFinancialOptions } from '../services/firestoreSync';
 import { FiltroData, isDateInRange, getPeriodoDescricao } from '../utils/dateFilter';
@@ -47,7 +58,7 @@ export const PagamentosFeitosTab: React.FC<PagamentosFeitosTabProps> = ({
 
   // Form states
   const [dataPagamento, setDataPagamento] = useState(() => new Date().toISOString().split('T')[0]);
-  const [valorInput, setValorInput] = useState('');
+  const [valorInput, setValorInput] = useState('0,00');
   const [beneficiario, setBeneficiario] = useState('');
   const [numeroNotaFiscal, setNumeroNotaFiscal] = useState('');
   const [mesEmissaoNF, setMesEmissaoNF] = useState(() => {
@@ -137,7 +148,7 @@ export const PagamentosFeitosTab: React.FC<PagamentosFeitosTabProps> = ({
   // Edit in Modal
   const [pagamentoParaEditar, setPagamentoParaEditar] = useState<PagamentoFeito | null>(null);
   const [editDataPagamento, setEditDataPagamento] = useState('');
-  const [editValorInput, setEditValorInput] = useState('');
+  const [editValorInput, setEditValorInput] = useState('0,00');
   const [editBeneficiario, setEditBeneficiario] = useState('');
   const [editNumeroNF, setEditNumeroNF] = useState('');
   const [editMesEmissaoNF, setEditMesEmissaoNF] = useState('');
@@ -246,7 +257,7 @@ export const PagamentosFeitosTab: React.FC<PagamentosFeitosTabProps> = ({
 
   const resetForm = () => {
     setDataPagamento(new Date().toISOString().split('T')[0]);
-    setValorInput('');
+    setValorInput('0,00');
     setBeneficiario('');
     setNumeroNotaFiscal('');
     const d = new Date();
@@ -267,7 +278,7 @@ export const PagamentosFeitosTab: React.FC<PagamentosFeitosTabProps> = ({
   const handleStartEdit = (p: PagamentoFeito) => {
     setEditingId(p.id);
     setDataPagamento(p.dataPagamento);
-    setValorInput(p.valor.toString().replace('.', ','));
+    setValorInput(formatNumberToCurrencyInput(p.valor));
     setBeneficiario(p.beneficiario);
     setNumeroNotaFiscal(p.numeroNotaFiscal);
     setMesEmissaoNF(p.mesEmissaoNF);
@@ -315,7 +326,7 @@ export const PagamentosFeitosTab: React.FC<PagamentosFeitosTabProps> = ({
   const handleOpenEditModal = (p: PagamentoFeito) => {
     setPagamentoParaEditar(p);
     setEditDataPagamento(p.dataPagamento);
-    setEditValorInput(p.valor.toString().replace('.', ','));
+    setEditValorInput(formatNumberToCurrencyInput(p.valor));
     setEditBeneficiario(p.beneficiario);
     setEditNumeroNF(p.numeroNotaFiscal);
     setEditMesEmissaoNF(p.mesEmissaoNF);
@@ -586,10 +597,15 @@ export const PagamentosFeitosTab: React.FC<PagamentosFeitosTabProps> = ({
                   <input
                     id="input-valor-pagamento"
                     type="text"
+                    inputMode="numeric"
                     required
-                    placeholder="Ex: 1.500,00"
+                    placeholder="0,00"
                     value={valorInput}
-                    onChange={(e) => setValorInput(e.target.value)}
+                    onFocus={(e) => {
+                      if (valorInput === '0,00' || valorInput === '') e.target.select();
+                    }}
+                    onChange={(e) => setValorInput(maskCurrencyInput(e.target.value))}
+                    onBlur={() => setValorInput(sanitizeCurrencyInputOnBlur(valorInput))}
                     className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
                   />
                 </div>
@@ -1057,10 +1073,21 @@ export const PagamentosFeitosTab: React.FC<PagamentosFeitosTabProps> = ({
                       {pag.observacoes && !(() => {
                         const obsLower = pag.observacoes.trim().toLowerCase();
                         return (
-                          obsLower.startsWith('lançamento automático via pix') ||
-                          obsLower.startsWith('lançamento manual via pix') ||
-                          obsLower.startsWith('pagamento via pix ref. nf') ||
-                          obsLower === 'pagamento via pix'
+                          obsLower.includes('lançamento automático') ||
+                          obsLower.includes('lancamento automatico') ||
+                          obsLower.includes('lançamento manual') ||
+                          obsLower.includes('lancamento manual') ||
+                          obsLower.includes('via pix') ||
+                          obsLower.includes('pagamento via pix') ||
+                          obsLower.includes('ref. nf') ||
+                          obsLower.includes('ref nf') ||
+                          obsLower.includes('automático') ||
+                          obsLower.includes('automatico') ||
+                          (pag.formaPagamento?.toLowerCase().includes('pix') && (
+                            obsLower.includes('nota fiscal') ||
+                            obsLower === pag.beneficiario.toLowerCase().trim() ||
+                            (pag.numeroNotaFiscal && obsLower === pag.numeroNotaFiscal.toLowerCase().trim())
+                          ))
                         );
                       })() && (
                         <div className="text-[11px] text-slate-500 truncate" title={pag.observacoes}>
@@ -1110,12 +1137,15 @@ export const PagamentosFeitosTab: React.FC<PagamentosFeitosTabProps> = ({
                       )}
                     </td>
                     <td className="py-2.5 px-2 whitespace-nowrap">
-                      {pag.banco ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-800 border border-blue-200">
-                          <Building className="w-2.5 h-2.5 text-blue-600 shrink-0" />
-                          <span>{pag.banco}</span>
-                        </span>
-                      ) : (
+                      {pag.banco ? (() => {
+                        const { badge, icon } = getBancoBadgeClass(pag.banco);
+                        return (
+                          <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] border ${badge}`}>
+                            <Building className={`w-3 h-3 ${icon} shrink-0`} />
+                            <span>{pag.banco}</span>
+                          </span>
+                        );
+                      })() : (
                         <span className="text-[11px] text-slate-400 italic">Não informado</span>
                       )}
                     </td>
@@ -1377,10 +1407,15 @@ export const PagamentosFeitosTab: React.FC<PagamentosFeitosTabProps> = ({
                       </div>
                       <input
                         type="text"
+                        inputMode="numeric"
                         required
                         placeholder="0,00"
                         value={editValorInput}
-                        onChange={(e) => setEditValorInput(e.target.value)}
+                        onFocus={(e) => {
+                          if (editValorInput === '0,00' || editValorInput === '') e.target.select();
+                        }}
+                        onChange={(e) => setEditValorInput(maskCurrencyInput(e.target.value))}
+                        onBlur={() => setEditValorInput(sanitizeCurrencyInputOnBlur(editValorInput))}
                         className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 font-bold focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                       />
                     </div>
